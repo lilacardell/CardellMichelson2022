@@ -227,7 +227,7 @@ skew_country=skew_mkt%>%
             across(c(cv,skew,kurt),round,3))%>%
   ungroup()
 
-#need to drop markets with only one observation
+#need to drop markets with only one observation or countries with only one market
 
 print=xtable(skew_country,type="latex")
 names(print)<-c("Country","Market Type","Markets","Market-Months","Coefficient of \n Variation","Average Market Skewness ","Percent Markets Negative Skew", "Kurtosis","Percent Markets Negative Kurtosis")
@@ -305,6 +305,9 @@ season1=returns_con%>%
   group_by(country,commodity,market_type,market)%>%
   filter(n()>1)%>%#Mauritania drops out
   ungroup()%>%
+  group_by(country,commodity,market_type)%>%
+  filter(n()>1)%>% #Nigeria drops outs
+  ungroup()
   dplyr::select(1:5,hmin1,pmax1,returns1,returns1_c,noarb1,noarb1_c,yield_kgha)
 
 season2=returns_con%>%
@@ -312,6 +315,9 @@ season2=returns_con%>%
   group_by(country,commodity,market_type,market)%>%
   filter(n()>1)%>%
   ungroup()%>%
+  group_by(country,commodity,market_type)%>%
+  filter(n()>1)%>% 
+  ungroup()
   dplyr::select(1:5,hmin2,pmax2,returns2,returns2_c,noarb2,noarb2_c,yield_kgha)
 
 season=season1%>%
