@@ -14,7 +14,7 @@ knitr::opts_chunk$set(
 	include = FALSE,
 	root.dir = "C:/Users/lilac2/Box/GIEWS_Project/GIEWS/R"
 )
-options(scipen=999)
+options(scipen=999,warn=-1)
 set.seed(101484)
 ###  Check for and load Packages   ###
 #writeLines('PATH="${RTOOLS40_HOME}\\usr\\bin;${PATH}"', con = "~/.Renviron")
@@ -33,7 +33,7 @@ pkgTest  =  function(x) {
 }
 
 ## These lines load the required packages
-packages  =  c('data.table','tidyverse','haven','foreign','stargazer','lubridate','knitr','xtable','tables','kableExtra','car','stringr','styler','readxl','magrittr','sjmisc','ggplot2','ggpubr','ggnewscale','bookdown','scales','quantmod','distr6','plyr','esquisse','forcats','ggrepel','gdata','stringdist','SparseM','quantreg','mfx','erer','margins','moments',"lemon",'rnaturalearth','DescTools')
+packages  =  c('data.table','tidyverse','haven','foreign','stargazer','lubridate','knitr','xtable','tables','kableExtra','car','stringr','styler','readxl','magrittr','sjmisc','ggplot2','ggpubr','ggnewscale','bookdown','scales','quantmod','distr6','plyr','esquisse','forcats','ggrepel','gdata','stringdist','SparseM','quantreg','mfx','erer','margins','moments',"lemon",'rnaturalearth','DescTools','tseries')
 ## you can add more packages here
 
 lapply(packages, pkgTest)
@@ -203,45 +203,8 @@ rm(hend1,hend2,returns_dur1,returns_dur2)
 ```
 
 
-
-4. Look at measures of skewness and kurtosis in all markets
-```{r skew4,echo=FALSE,include=FALSE}
-
-
-skew_mkt=maize%>%
-  group_by(country,market,market_type)%>%
-  dplyr::summarise(cv=(mean(price_real)/sd(price_real)),
-                   skew=skewness(price_real),kurt=kurtosis(price_real),nobs=n())%>%
-  mutate(n_skew=if_else(skew<=0,1,0),n_kurt=if_else(kurt<=0,1,0))%>%
-  ungroup()
-
-#no evidence of negative kurtosis in any markets
-
-skew_country=skew_mkt%>%
-  group_by(country,market_type)%>%
-  filter(n()>1)%>%
-  dplyr::summarise(across(c(cv,kurt,skew),mean,na.rm=TRUE),across(starts_with("n"),sum,na.rm=TRUE),n_mkt=n())%>%
-  dplyr::mutate(n_skew_pct=n_skew/n_mkt,n_kurt_pct=n_kurt/n_mkt)%>%
-  dplyr::select(country,market_type,n_mkt,nobs,cv,skew,n_skew_pct,kurt,n_kurt_pct)%>%
-   dplyr::mutate(across(c(n_skew_pct,n_kurt_pct),~paste0(sprintf("%.1f",.*100),"%")),
-            across(c(cv,skew,kurt),round,3))%>%
-  ungroup()
-
-#need to drop markets with only one observation or countries with only one market
-
-print=xtable(skew_country,type="latex")
-names(print)<-c("Country","Market Type","Markets","Market-Months","Coefficient of \n Variation","Average Market Skewness ","Percent Markets Negative Skew", "Kurtosis","Percent Markets Negative Kurtosis")
-print(print,file="C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/skew_kurt_022521.tex",include.rownames=FALSE)
-
-
-rm(skew_mkt,skew_country,print)
-
-```
-
-
-
-5. Map of markets
-```{r map5,echo=FALSE}
+4. Map of markets
+```{r map4,echo=FALSE}
 
 setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
 
@@ -278,8 +241,8 @@ rm(markets,countries,world)
 ```
 
 
-6. Create summary data sets
-```{r summary6,echo=FALSE}
+5. Create summary data sets
+```{r summary5,echo=FALSE}
 
 
 ## Duration (FULL SET) data set for primary maize season, keep markets with at least two years of data for each duration
@@ -287,6 +250,9 @@ duration1=returns_dur%>%
   filter(is.finite(returns1))%>%
   group_by(country,commodity,market_type,market,duration1)%>%
   filter(n()>1)%>%#Mauritania drops out
+  ungroup()%>%
+  group_by(country,commodity,market_type,duration1)%>%
+  filter(length(unique(market))>1)%>% #Nigeria-Retail should drop out
   ungroup()
 
 #Duration (MARKET LEVEL)
@@ -299,25 +265,26 @@ duration1_mkt=duration1%>%
   dplyr::select(-n_neg)
 
 
-## Seasonal returns for primary and second maize season data set, keep markets with at least three crop years
+## Seasonal returns for primary and second maize season data set, keep markets with at least two crop years
 season1=returns_con%>%
    filter(is.finite(returns1))%>%
   group_by(country,commodity,market_type,market)%>%
   filter(n()>1)%>%#Mauritania drops out
   ungroup()%>%
   group_by(country,commodity,market_type)%>%
-  filter(n()>1)%>% #Nigeria drops outs
-  ungroup()
+  filter(length(unique(market))>1)%>% #Nigeria-Retail should drop out
+  ungroup()%>%
   dplyr::select(1:5,hmin1,pmax1,returns1,returns1_c,noarb1,noarb1_c,yield_kgha)
+  
 
 season2=returns_con%>%
    filter(is.finite(returns2))%>%
   group_by(country,commodity,market_type,market)%>%
-  filter(n()>1)%>%
+  filter(n()>1)%>%#Mauritania drops out
   ungroup()%>%
   group_by(country,commodity,market_type)%>%
-  filter(n()>1)%>% 
-  ungroup()
+  filter(length(unique(market))>1)%>%
+  ungroup()%>%
   dplyr::select(1:5,hmin2,pmax2,returns2,returns2_c,noarb2,noarb2_c,yield_kgha)
 
 season=season1%>%
@@ -338,7 +305,7 @@ season_mkt=season%>%
 
 #%>%dplyr::rename(n_season=n.returns1)
 
-#973 markets 
+#969 markets 
 
 pctp=function(x){
   y=mean(x[x>0],na.rm=TRUE)
@@ -377,6 +344,46 @@ season_country=season_country%>%
 rm(all_years,season1,season2,pctn,pctp)
  
 ```
+
+
+6. Look at measures of skewness and kurtosis in all markets
+```{r skew6,echo=FALSE,include=FALSE}
+
+clist=unique(season$country)
+#need to drop markets with only one observation or countries with only one market
+
+skew_mkt=maize%>%
+  filter(country%in%clist)%>%
+  group_by(country,market,market_type)%>%
+  filter(n()>1)%>%
+  dplyr::summarise(nobs=n(),cv=(mean(price_real)/sd(price_real)),
+                   skew=skewness(price_real),kurt=kurtosis(price_real))%>%
+  mutate(n_skew=if_else(skew<=0,1,0),n_kurt=if_else(kurt<=0,1,0))%>%
+  ungroup()
+
+#no evidence of negative kurtosis in any markets
+
+skew_country=skew_mkt%>%
+  group_by(country,market_type)%>%
+  filter(n()>1)%>%
+  dplyr::summarise(across(c(cv,kurt,skew),mean,na.rm=TRUE),across(starts_with("n"),sum,na.rm=TRUE),n_mkt=n())%>%
+  dplyr::mutate(n_skew_pct=n_skew/n_mkt,n_kurt_pct=n_kurt/n_mkt)%>%
+  dplyr::mutate(across(c(n_skew_pct,n_kurt_pct),~paste0(sprintf("%.1f",.*100),"%")),
+            across(c(cv,skew,kurt),round,3))%>%
+  ungroup()%>%
+  dplyr::select(country,market_type,n_mkt,skew,n_skew_pct)
+
+
+
+print=xtable(skew_country,type="latex")
+names(print)<-c("Country","Market Type","Markets","Average Market Skewness ","Percent Markets Negative Skew")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/skew_kurt_",format(Sys.Date(),"%d_%m_%y"),".tex"),include.rownames=FALSE)
+
+rm(skew_mkt,skew_country,print)
+
+```
+
+
 
 
 7. Print summary datasets
@@ -540,14 +547,14 @@ ggsave("seasondotplot.png")
 neg_all=cb1%>%filter(pct_season1==1) #22
 pos_all=cb1%>%filter(pct_season1==0) #168
 neg_country=unique(neg_all$country) #12 different countries
-pos_country=unique(pos_all$country) #87 different countries
+pos_country=unique(pos_all$country) #18 different countries
 neg_market=unique(neg_all$market) #22 different markets
 pos_market=unique(pos_all$market) #168 different markets
 neg_all=season%>%filter(market%in%neg_market)#63 total observations for those 22 markets
-pos_all=season%>%filter(market%in%pos_market)#909 total observations for those 168 markets
+pos_all=season%>%filter(market%in%pos_market)#902 total observations for those 168 markets
 
 neg_year=unique(neg_all$cropyear) #15 different years
-pos_year=unique(pos_all$cropyear) #19 different years
+pos_year=unique(pos_all$cropyear) #18 different years
 
 
 
@@ -590,6 +597,8 @@ ggsave("cropyear_returns_box.PNG")
 rm(dot,box)
 
 
+
+
 ```
 
 
@@ -628,6 +637,7 @@ rm(decile,extremedot)
 ```{r OLSreg11 ,echo=FALSE}
 
 
+
 split.df=split(extreme1,extreme1$country)
 country.name=names(split.df)
 #results<-list()
@@ -650,6 +660,9 @@ pm=probitmfx(factor(noarb1)~z_h1+factor(cropyear),data=df,atmean=FALSE,robust=TR
 rsq_p=PseudoR2(p,which="McFadden")
 coef_p=pm$mfxest[1,1]
 pval_p=pm$mfxest[1,4]
+
+#test for unit root
+adf=adf.test(df$returns)
 
 cprep=data.frame(cname,coef_o,pval_o,rsq_o,coef_p,pval_p,rsq_p)
 table=rbind(table,cprep)
@@ -683,6 +696,13 @@ print(t,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/OLSpro
 rm(cmat,cprep,df,m,prep,results,table,split.df,c,cstars,n,names,o,table,t,r,v,p,i,coef,cname,pm,s,list=ls(pattern="pool"))
 rm(list=ls(pattern="_o"))
 rm(list=ls(pattern="_p"))
+
+#market level unit value test
+extreme1_mkt=extreme1%>%
+  dplyr::select(country,market,cropyear,returns1_c)%>%
+  unite("c_mkt",c("country","market"))%>%
+  group_by(c_mkt)%>%
+  dplyr::summarise(pval=ifelse(n()<=3,as.numeric(NA),kpss.test(returns1_c,null="Trend")$p.value))
 
 
 ```
@@ -1013,15 +1033,16 @@ rm(f_grid_dur_dot,f_frid_dur_box)
 ```
 
 
+A2. 
 
 9.z Zambia Maize Retail Price Trend Tables
 ```{r table1,echo=FALSE, warning=FALSE,paged.print=TRUE,eval=TRUE}
 
 #setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Tables")
-zambia_mkt=season_month%>%
-  filter(country=="Zambia"&year>=2015)%>%
-   group_by(country,region,market)%>%
-   dplyr::summarise(n_mktyr=n(),n_neg=sum(noarb12),
+zambia_mkt=season%>%
+  filter(country=="Zambia"&market_type=="Retail")%>%
+   group_by(country,market)%>%
+   dplyr::summarise(n_mktyr=n(),n_neg=sum(noarb1),
       pct_m=mean(pct_arb12),pct_pos=mean(pct_arb12[pct_arb12>0]),pct_neg=mean(pct_arb12[pct_arb12<=0]))%>%
   ungroup()%>%
    mutate(pct_yr=n_neg/n_mktyr)%>%
@@ -1044,6 +1065,7 @@ print(print,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Tables/zambia_m
 
 
 ```
+
 
 
 Kenya sidenote
@@ -1147,350 +1169,10 @@ ggsave("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Graphs/kenya_marketprices.PNG",w
 
 
 
-A1. Probit regressions for decile and duration
-```{r reg,echo=FALSE,include=FALSE}
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Tables")
 
-coef_prep=function(x){
-  cmat=as.matrix(x$mfxest)
-  n<-row.names(cmat)
-  c<-sprintf(cmat[,"dF/dx"],fmt='%#.2f')
-  p<-cmat[,"P>|z|"]
-  mystars <- ifelse(p < .01, "***", ifelse(p < .05, "** ", ifelse(p < .1, "* ", " ")))
-  m=as.data.frame(matrix(c(n,paste(c, mystars, sep="")), ncol=2))
-}
 
-
-#####1. Regress probability of negative returns on harvest price, year, and country
-#probit.1=probitmfx(noarb1~z_h1+factor(country)+factor(year)-1,data=reg_df)
-#p1=glm(noarb1~0+factor(country)+factor(year)+z_h1,data=season_df,family=binomial(link = "probit"),x=TRUE)
-#p1_out=coef_prep(summary(p1))
-#colnames(p1_out)<-c("variable","est.probit")
-#p1_ma=margins(p1)
-#print(p1_ma$out)
-
-#####3. Break harvest price into deciles by country and run probit for probability of negative returns on decile of harvest price, year, and country
-#p3=glm(factor(noarb1)~factor(country)+factor(year)+factor(h1_d),data=season_df,family=binomial(link = "probit"))
-p3_mx=probitmfx(factor(noarb1)~factor(h1_d)+factor(country)+factor(year),data=season_df,atmean=FALSE,robust=TRUE)
-p3_mx_coef <- p3_mx$mfxest[,1] #Estimated coefficients
-p3_mx_pz <- p3_mx$mfxest[,4] #pr>z
-p3_out=coef_prep(p3_mx)
-colnames(p3_out)<-c("variable","est.meffects.alldeciles")
-
-# p33_mx=probitmfx(factor(noarb12)~factor(h1_d)+factor(country)+factor(year),data=season_df,atmean=FALSE,robust=TRUE)
-# p33_mx_coef <- p33_mx$mfxest[,1] #Estimated coefficients
-# p33_mx_pz <- p33_mx$mfxest[,4] #pr>z
-# p33_out=coef_prep(p33_mx)
-# colnames(p33_out)<-c("variable","est.meffects.alldeciles")
-#p3_ma=margins(p3)
-#print(p3_ma$out)
-
-#####4. Break harvest price into deciles by country and run probit for probability of negative returns on year, and country and duration
-#p4=glm(noarb1~factor(country)+factor(year)+factor(duration1)+factor(h1_d),data=duration_month,family=binomial(link = "probit"))
-p4_mx=probitmfx(factor(noarb1)~z_h1+factor(duration1)+factor(country)+factor(year),data=duration_month,atmean=FALSE)
-p4_out=coef_prep(p4_mx)
-colnames(p4_out)<-c("variable","est.meffects.duration")
-#p4_ma=margins(p4)
-#print(p4_ma$out)
-
-
-#####2. Break harvest price into quintile by country and run probit for each quintile for probability of negative returns on duration, year, and country
-split.df=split(duration_month,duration_month$h1_q)
-quintile.name=names(split.df)
-
-for (i in 1:length(quintile.name)) {
-df=split.df[[i]]
-
-#out=summary(glm(factor(noarb1)~factor(country)+factor(year)+z_h1,data=df,family=binomial(link = "probit")))
-out=probitmfx(factor(noarb1)~factor(duration1)+factor(country)+factor(year),data=df,atmean=FALSE)
-m=coef_prep(out)
-# cmat=as.matrix(out$coefficients)
-# n<-row.names(cmat)
-# c<-sprintf(cmat[,"Estimate"],fmt='%#.2f')
-# p<-cmat[,"Pr(>|z|)"]
-# mystars <- ifelse(p < .01, "***", ifelse(p < .05, "** ", ifelse(p < .1, "* ", " ")))
-# m=as.data.frame(matrix(c(n,paste(c, mystars, sep="")), ncol=2))
-colnames(m)<-c("variable",paste0("est.meffect.duration.",quintile.name[i]))
-assign(paste0("cp.",quintile.name[i]),m)
-
-}
-
-table1<-full_join(p3_out,p4_out,by=c("variable"))%>%
-  full_join(cp.q1,by=c("variable"))%>%
-  full_join(cp.q2,by=c("variable"))%>%
-  full_join(cp.q3,by=c("variable"))%>%
-  full_join(cp.q4,by=c("variable"))%>%
-  full_join(cp.q5,by=c("variable"))%>%
-  mutate(variable=str_replace(variable, "factor\\(.*\\)", ""))
-
-
-t=xtable(table1,type="latex",auto=TRUE)
-#names(t)<-c("Variable","Negative Returns ",q1,q2,q3,q4,q5)
-align(t)<-"l|l|r|r|rrrrr|"
-print(t,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Tables/probitreturns_",format(Sys.Date(),"%d_%m_%y"),".tex"),include.rownames=FALSE)
-
-
-# table2<-full_join(p3_out,p4_out,by=c("variable"))%>%
-#   mutate(variable=str_replace(variable, "factor\\(.*\\)", ""))
-# 
-# t2=xtable(table2,type="latex",auto=TRUE)
-# #names(t)<-c("Variable","Negative Returns ",q1,q2,q3,q4,q5)
-# align(t2)<-"l|l|r|r|"
-# 
-# 
-# print(t2,file="Returns_112420.tex",include.rownames=FALSE)
-
-#p5_mx=probitmfx(factor(noarb1)~+factor(country)+factor(year),data=df,atmean=FALSE)
-# c.logit=exp(coef(logit))
-# se.coef <- function(glm.output){sqrt(diag(vcov(glm.output)))}
-# se.logit<- c.logit * se.coef(logit)
-# z <- coef(logit)/se.coef(logit)
-# p <- 2*pnorm(abs(coef(logit)/se.coef(logit)), lower.tail = F)
-# #p<-cmat[,"Pr(>|t|)"]
-# mystars <- ifelse(p < .01, "***", ifelse(p < .05, "** ", ifelse(p < .1, "* ", " ")))
-# estimate.logit=paste(sprintf(c.logit,fmt='%#.2f'), mystars, sep="")
-# m.logit=as.data.frame(estimate.logit)
-
-######Returns to duration by country (dotplot) vs prediction
-p1=lm(pct_arb1~0+factor(h1_d)+factor(duration1)+factor(country)+factor(year),data=duration_month)
-summary(p1)
-
-h1_d=paste0("d",seq(1,10,by=1))
-duration1=seq(1,11,by=1)
-country=unique(duration_month$country)
-year=seq(2000,2019,by=1)
-
-p_df=expand_grid(h1_d,duration1,country,year)
-p_df$pct_arb1_p=predict(p1,newdata=p_df)
-
-#p_df=p_df%>%
- # filter(is.finite(pct_arb1))
-
-duration_returns=duration_month%>%
-  dplyr::select(country,market,year,h1_d,duration1,pct_arb1)%>%
-  dplyr::rename(pct_arb1_a=pct_arb1)%>%
-  left_join(p_df,by=c("country","year","h1_d","duration1"))%>%
-pivot_longer(cols=starts_with("pct_arb"),names_to="type",values_to="pct_returns",values_drop_na = TRUE)%>%
-  mutate(type=as.factor(type))
-
-predict_dur=ggplot()+
-  geom_jitter(data=duration_returns,aes(x=factor(duration1),y=pct_returns*100,color=type),size=1,alpha=0.5)+
-scale_y_continuous(name="Percent returns to harvest price (%)", limits=c(-100,400),breaks=seq(-100,400,100))+xlab("Number of Months Post-Harvest")+
-  scale_color_manual(name="Returns",breaks=c("pct_arb1_a","pct_arb1_p"),values=c("blue","green"),labels=c("Actual Returns","Predicted Returns"))+
-  #scale_shape_manual(name="Returns",breaks=c("pct_arb1_a","pct_arb1_p"),values=c("16","17"),labels=c("Actual Returns","Predicted Returns"))+
-  geom_hline(yintercept=0,color="red",position="identity")+
-  facet_wrap(.~country,ncol=4)+labs(title="Returns by Number of Months Post-Harvest")+theme(legend.position = c(0.9, 0),legend.justification = c(1, 0),plot.title = element_text(hjust = 0.5,face="bold"),legend.title = element_blank())
-
-#print(f_grid_dur_dot)
-ggsave("predict_dur_facet.PNG",width=16,height=9)
-
-
-
-######Returns by country (dotplot) vs prediction
-p11=lm(pct_arb1~0+factor(h1_d)+factor(country)+factor(year),data=season_month)
-summary(p11)
-
-h1_d=paste0("d",seq(1,10,by=1))
-country=unique(season_month$country)
-year=seq(2000,2019,by=1)
-
-p_df2=expand_grid(h1_d,country,year)
-p_df2$pct_arb1_p=predict(p11,newdata=p_df2)
-
-decile_returns=season_month%>%
-  dplyr::select(country,year,h1_d,pct_arb1)%>%
-dplyr::rename(pct_arb1_a=pct_arb1)%>%
-  left_join(p_df2,by=c("country","year","h1_d"))%>%
-pivot_longer(cols=starts_with("pct_arb"),names_to="type",values_to="pct_returns",values_drop_na = TRUE)%>%
-  mutate(type=as.factor(type))
-
-decile_returns$h1_d<-reorder.factor(decile_returns$h1_d,new.order=decile)
-
-predict_hdec=ggplot()+geom_jitter(data=decile_returns,aes(x=factor(h1_d),y=pct_returns*100,color=type),size=1,alpha=0.5)+
- scale_y_continuous(name="Percent returns to harvest price (%)", limits=c(-100,400),breaks=seq(-100,400,100))+xlab("Harvest Price decile")+
-  geom_hline(yintercept=0,color="red",position="identity")+
-  scale_color_manual(name="Returns",breaks=c("pct_arb1_a","pct_arb1_p"),values=c("blue","green"),labels=c("Actual Returns","Predicted Returns"))+
-  facet_wrap(.~country,ncol=4)+labs(title="Seasonal Returns by Harvest Price Decile")+theme(legend.position = c(0.9, 0),legend.justification = c(1, 0),plot.title = element_text(hjust = 0.5,face="bold"),legend.title = element_blank())
-
-#print(f_grid_dur_dot)
-ggsave("predict_dec_facet.PNG",width=16,height=9)
-
-rm(list=ls(pattern="q"),decile,h1_d,i,year,country,decile_returns,df,out,m,t,t1,t2,table1,table2)
-rm(list=ls(pattern="p"))
-
-```
-
-
-
-A2. Plots for distribution of extreme harvest prices and returns (for full set of duration)
-```{r plotsH,echo=FALSE,include=FALSE}
-
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
-
-# ######Returns to harvest price by country
-# f_grid_hprice=ggplot()+geom_jitter(data=season_month,aes(x=hend_price1,y=pct_arb12*100,color=factor(noarb12)))+ ylab("Seasonal Returns (%)")+xlab("Harvest Price (2015 local currency)")+scale_color_manual(name="Seasonal Returns",breaks=c("1","0"),values=c("red","black"),labels=c("Negative Returns","Positive Returns"))+facet_wrap(.~country,scales="free_x",ncol=4)+labs(title="Returns to storage by harvest price")+theme(legend.position = c(0.9, 0),legend.justification = c(1, 0),plot.title = element_text(hjust = 0.5,face="bold"))
-# 
-# #print(f_grid_hprice)
-# ggsave("hprice_returns_facet.PNG",width=12,height=9)
-
-######Returns to duration by country (dotplot)
-f_grid_dur_dot=ggplot()+geom_jitter(data=subset(duration1,is.finite(returns1)&market_type=="Retail"),aes(x=factor(duration1),y=returns1*100,color=factor(noarb1)),size=1)+scale_y_continuous(name="Returns to storage (%)", limits=c(-100,400),breaks=seq(-100,400,100))+xlab("Number of Months Post-Harvest")+
-  scale_color_manual(name="Returns",breaks=c("0","1"),values=c("red","black"),labels=c("Negative Returns","Positive Returns"))+
-  facet_wrap(.~country,ncol=4,scale="free_x")+labs(title="Intratemporal returns to storage")+theme(legend.position = c(0.9, 0),legend.justification = c(1, 0),plot.title = element_text(hjust = 0.5,face="bold"))
-
-#print(f_grid_dur_dot)
-ggsave("dur_returns_facet_dot.PNG",width=12,height=9)
-
-######Returns to duration by country (boxplot)
-f_grid_dur_box=ggplot()+geom_boxplot(data=subset(duration1,is.finite(returns1)&market_type=="Retail"),aes(x=factor(duration1),y=returns1*100),outlier.shape=1,position="dodge")+scale_y_continuous(name="Returns to storage (%)", limits=c(-100,400),breaks=seq(-100,400,100))+xlab("Number of Months Post-Harvest")+geom_hline(yintercept=0,color="red",position="identity")+
-  facet_wrap(.~country,ncol=4)+
-  #labs(title="Intratemporal returns to storage (primary maize season)")+
-  theme(legend.position = c(0.9, 0),legend.justification = c(1, 0),plot.title = element_text(hjust = 0.5,face="bold"))
-
-print(f_grid_dur_box)
-ggsave("dur_returns_facet_box.PNG",width=12,height=9)
-
-
-
-# #boxplot for distribution of returns over the whole set for season 1 by duration post-harvest
-# returns_box= ggplot(data=duration_month,aes(x=factor(duration1),y=pct_arb1*100))+geom_boxplot(outlier.shape=1,position="dodge")+geom_hline(yintercept=0,color="red",position="identity")+
-#  scale_y_continuous(name="Returns to storage (%)", limits=c(-100,500),breaks=seq(-100,500,100))+ scale_x_discrete(name="Number of months post-harvest", breaks=c("1","2","3","4","5","6","7","8","9","10","11"),labels=c("1","2","3","4","5","6","7","8","9","10","11"))+ 
-#     theme(panel.grid.major = element_blank(),legend.position="none",panel.grid.minor = element_blank(), panel.background = element_blank(),axis.line = element_line(color="black"))
-
-#print(returns_box)
-#ggsave("returns_duration_box.PNG",width=12,height=9)
-
-# #distribution of harvest price zscores by country including Guinea
-# hm1=ggplot()+geom_boxplot(data=hend_month1,aes(x=factor(country),y=z_h1),outlier.shape=1,position="dodge")+
-#  scale_y_continuous(name="Harvest Price z-score (w.r.t. country mean)", limits=c(-5,10),breaks=seq(-5,10,1),expand=c(0,0))+xlab("Country")+ggtitle("Distribution of Harvest Prices by Country (including Guinea)")
-# 
-# #print(hm1)
-# ggsave("harvestprices_zcountry_box.PNG")
-# 
-# #distribution of harvest price zscores by country without Guinea
-# # hm1_ng=ggplot()+geom_boxplot(data=subset(hend_month1,!country%in% c("Guinea","Nigeria","Mauritania")),aes(x=factor(country),y=z_h1),outlier.shape=1,position="dodge")+
-# #  scale_y_continuous(name="Harvest Price z-score (w.r.t. market mean)", limits=c(-1,5),breaks=seq(-1,5,1),expand=c(0,0))+xlab("Country")+ggtitle("Distribution of Harvest Prices by Country (without Guinea)")+geom_text(data=subset(nobs,country!="Guinea"),aes(x=country,y=-0.9,label=n),size=3,color="red")
-# # 
-# # #print(hm1)
-# # ggsave("harvestprices_noGuinea_box.PNG")
-# 
-# #distribution of harvest price zscores by country without Guinea, and with returns by duration
-# hm_arb1_ng=ggplot()+geom_boxplot(data=subset(hend_month1,!country%in% c("Guinea","Nigeria","Mauritania","Guinea-Bissau")),aes(x=factor(country),y=z_h1),outlier.shape=4,position="identity",size=1.5)+
-#   geom_jitter(data=subset(duration_mkt,country!="Guinea"&duration1>0),aes(x=factor(country),y=pct_arb1_m/100,color=duration1),alpha=0.5,size=1.5)+
-#   scale_color_gradient(low="lightgreen",high="black",name="Number of months \n post-harvest",limits=c(1,12),labels=seq(0,12,3),breaks=seq(0,12,3))+
-#   scale_y_continuous(name="Harvest Price z-score (w.r.t. market mean)", limits=c(-1,5),breaks=seq(-1,5,1),expand=c(0,0),sec.axis=sec_axis(~.*100,name="Average returns to storage by market and duration (%)"))+xlab("Country")+labs(title="Distribution of Harvest Prices by Country",subtitle="Boxplots of Harvest Price z-scores w.r.t market mean \n Points of Average Market Returns by Months Post-Harvest")+
-#   theme(legend.position=c(0.5,0.9),panel.background = element_blank(),axis.line = element_line(color="black"),legend.background = element_rect(size=0.5, linetype="solid",color="gray"),plot.title = element_text(hjust = 0.1,face="bold"),plot.subtitle = element_text(hjust = 0.1))
-# 
-# #print(hm1_ng)
-# ggsave("harvestprices_returns_noG.PNG")
-
-
-#distribution of harvest price zscores by country without Guinea, and with returns by duration
-# hd_arb1_ng=ggplot()+geom_jitter(data=duration_month,aes(y=pct_arb1,x=h1_,color=duration1))
-#   
-#   geom_jitter(data=subset(duration_mkt,country!="Guinea"&duration1>0),aes(x=factor(country),y=pct_arb1_m/100,color=duration1),alpha=0.5,size=1.5)+
-#   scale_color_gradient(low="lightgreen",high="black",name="Number of months \n post-harvest",limits=c(1,12),labels=seq(0,12,3),breaks=seq(0,12,3))+
-#   scale_y_continuous(name="Harvest Price z-score (w.r.t. market mean)", limits=c(-1,5),breaks=seq(-1,5,1),expand=c(0,0),sec.axis=sec_axis(~.*100,name="Average returns to storage by market and duration (%)"))+xlab("Country")+labs(title="Distribution of Harvest Prices by Country",subtitle="Boxplots of Harvest Price z-scores w.r.t market mean \n Points of Average Market Returns by Months Post-Harvest")+
-#   theme(legend.position=c(0.5,0.9),panel.background = element_blank(),axis.line = element_line(color="black"),legend.background = element_rect(size=0.5, linetype="solid",color="gray"),plot.title = element_text(hjust = 0.1,face="bold"),plot.subtitle = element_text(hjust = 0.1))
-#print(hm1_ng)
-#ggsave("harvestprices_returns_noG.PNG")
-
-
-
-##########do dot plots for for each country, and add in second harvest for those countries?
-# levels(mz1$zbin1)<-list("[-1,-0.5]"="[-1,-0.5]", "(-0.5,0]"="(-0.5,0]","(0,0.5]"="(0,0.5]", "(0.5,1]"="(0.5,1]", "(1,1.5]"="(1,1.5]", "(1.5,2]"="(1.5,2]", "(2,2.5]"="(2,2.5]", "(2.5,3]"="(2.5,3]", "(3,5.5)"="(5,5.5]","(3,5.5)"="(4.5,5]","(3,5.5)"="(4,4.5]","(3,5.5)"="(3.5,4]","(3,5.5)"="(3,3.5]")
-# 
-# 
-# returns_dot=ggplot()+geom_point(data=mz1,aes(x=factor(duration1),y=pct_arb1,color=zbin1),size=2,alpha=0.75)+
-#    scale_x_discrete(name="Number of months post-harvest", breaks=c("1","2","3","4","5","6","7","8","9","10","11"),labels=c("1","2","3","4","5","6","7","8","9","10","11"))+ 
-#  scale_y_continuous(name="Percent returns to harvest price (%)", limits=c(-100,500),breaks=seq(-100,500,100))+
-#   scale_color_manual(
-#     #values= c("red4","red","lightgreen","green1","green2","green3","green4","forestgreen","darkgreen"),
-#      values= c("red4","red","skyblue1","skyblue3","dodgerblue1","dodgerblue3","blue2","blue4","midnightblue"),
-#     breaks=c("[-1,-0.5]", "(-0.5,0] ","(0,0.5] ","(0.5,1] ","(1,1.5] ","(1.5,2]", "(2,2.5] ","(2.5,3]", "(3,5.5)"),
-#                      name="Z score of harvest price")
-
-rm(hm1,hm1_ng,hm_arb1_ng,returns_box,list=ls(pattern="f_grid"))
-
-```
-
-
-
-
-A4. (tbd ) Analysis and output for paper 1.5: Risk premium/certainty equivalent over all length of time
-```{r sd,echo=FALSE,results='asis', message = FALSE}
-
-# setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/R/output")
-# #create sequence of storage losses from 0-100%
-# #alpha_val=seq(0.00,0.75,by=0.01)
-# 
-# #alpha_results=data.frame(country=character(),equal_test=numeric(),e_store=numeric(),e_nostore=numeric(),
-#    # FOSD=character(),p_d_within=numeric(),SOSD=character(),p_s_within=numeric(),TOSD=character(),p_t_within=numeric(),alpha=numeric())
-# 
-# 
-# #for (a in alpha_val){
-# 
-# #returns to main season
-# duration_risk1=duration_month%>%
-#     #dplyr::select(country,market,year,month,date,price_real,yield_kgha,hend_price1,pct_arb1)%>%
-#   filter(!is.na(yield_kgha)&year<2020&!is.na(pct_arb1))%>%
-#   mutate(wealth0=hend_price1*yield_kgha,wealth1=price_real*yield_kgha,return=pct_arb1)%>%
-#   dplyr::rename(pl=price_real,ph=hend_price1,yield=yield_kgha)%>%
-#   dplyr::select(1:5,pl,ph,duration1,yield,wealth0,wealth1,return)
-# 
-# 
-# #number of observations by market and duration, 8494 have 2 or more observations
-# count_mktmonth=aggregate(data=duration_risk1,pl~country+market+duration1,FUN=length)%>%
-#   arrange(country,market,duration1)%>%
-#   group_by(country,market,duration1)%>%
-#   filter(pl>1)
-# 
-# 
-# d_ex_price=duration_risk1%>%
-#   arrange(country)%>%
-#   group_by(country,duration1)%>%
-#   dplyr::mutate(across(c(ph,pl,return),list(e=mean,v=var),na.rm=TRUE,.names = "{.fn}.{.col}"))%>%
-#   ungroup()%>%
-#   dplyr::select(1:5,duration1,e.pl,ph,v.pl,return,e.return,v.return)
-# 
-# 
-# #create sequence of risk aversion coefficients 
-# rr=seq(0,6,by=0.1)
-# 
-# sim_rr=expand_grid(d_ex_price,rr)%>%
-#   mutate(ce1=e.pl-((rr*v.pl)/(2*e.pl))
-#          #,ce2=e.return*(1-((v.return*rr)/2)),r.rp=(v.return*rr)/2
-#          )%>%
-#   mutate(choice1=if_else(ph<ce1,"store","no storage"),store1=if_else(ph<ce1,1,0)
-#          #,store2=if_else(r.rp<((e.pl/ph)-1),1,0)
-#          )%>%
-#    group_by(country,rr,duration1)%>%
-#   dplyr::summarise(store1_m=mean(store1))%>%
-#   mutate(store1_m=100*store1_m)
-# 
-# 
-# risk_plot2=ggplot()+
-#   geom_path(data=sim_rr,aes(x=rr,y=factor(duration1),color=store1_m,group=duration1),size=2)+
-#   scale_color_gradient(low="yellow",high="red",name="Percent of Markets Storing",limits=c(0,100))+
-#   scale_y_discrete(name="Number of Months Post-Harvest",expand=c(0,0))+
-#   scale_x_continuous(name="Relative Risk Aversion Coeffient",limits=c(0,6),breaks=seq(0,6,1),expand=c(0,0))+
-#   facet_wrap(.~country,scales="free_x",ncol=4)+labs(title="Optimal Storage Uptake by Number of Months Post-Harvest")+
-#   theme(panel.grid.minor = element_blank(),panel.background = element_blank(),panel.grid.major = element_blank(),
-#          axis.line = element_line(color="black"),
-#          legend.position = c(0.9, 0),legend.justification = c(1, 0),
-#         plot.title = element_text(hjust = 0.5,face="bold"),
-#         plot.margin=margin(-0.5,-0.5,-0.5,-0.5,"pt"), panel.margin = unit(0,"null"),
-#         text= element_text(family="serif"))
-# 
-# 
-# ggsave("riskcoef_dur_110420.PNG",width=12,height=9)
-
-
-```
-
-
-A5. Output for Hope presentation: Monthly Average and Min Max Graphs by Country and Market
+A2: Monthly Average and Min Max Graphs by country
 ```{r monthly average graphs, echo=FALSE, warning=FALSE,paged.print=TRUE,eval=TRUE}
 
 setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Graphs/Country level")
@@ -1633,644 +1315,6 @@ p=subset(maize_pdiff,maize_pdiff$country==clist[i])
 
 lapply(clist,pdiff.graph)
 ```
-
-A7. Random figures related to zscore of prices and returns
-```{r fig2,echo=FALSE,results='asis', message = FALSE}
-
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Graphs")
-
-# z_long=more1_maize%>%
-#   dplyr::select(country,market,year,e_returns,contains("hend"),contains("lean"))%>%
-#   group_by(country,market)%>%
-#   dplyr::mutate(across(hend1:lean2,scale_x),zreturns=scale_x(e_returns))%>%
-#   ungroup()%>%
-#   pivot_longer(cols=hend1:lean2,names_to="season",values_to="zscore",values_drop_na = TRUE)%>%
-#  mutate(season=revalue(season,c("hend1"="hend","hend2"="hend",
-#                                  "lean1"="lean","lean2"="lean")))%>%
-#  group_by(country,market,year,season)%>%
-#   dplyr::summarise_all(~mean(.,na.rm=TRUE))%>%
-# #dplyr::summarise(returns=mean(e_returns,na.rm=TRUE),zreturns=mean zscore=mean(zscore,na.rm=TRUE))%>%
-#   mutate(zscore=if_else(is.na(zscore),0,zscore),dpct=e_returns*100)
-# 
-# z_wide=z_long%>%
-#   pivot_wider(names_from =season,values_from=c("zscore"))
-# 
-# 
-# # z1=ggplot()+geom_point(data=z_wide,aes(x=hend,y=dpct))+
-# #   scale_y_continuous(name="Seasonal Returns (%)",limits=c(-100,500),breaks=seq(-100,500,100)) +  scale_x_continuous(name="Z-score of Harvest Price",limits=c(-3,3),breaks=seq(-3,3,1))+  theme(panel.grid.minor = element_blank(),axis.line = element_line(color="black"))+geom_vline(xintercept=0,color="red")+geom_hline(yintercept=0,color="red")
-# # 
-# # print(z1)
-# # ggsave("highyear_z1.png")
-# 
-# 
-# # z2=ggplot(data=z_wide,aes(x=hend,y=zreturns))+geom_point()+
-# #   #geom_smooth(method="loess",span=0.2,se=F)+
-# #   geom_smooth(method="lm",formula=y~splines::bs(x,5),se=F,size=2)+
-# #   scale_y_continuous(name="Z-Score of Seasonal Returns",limits=c(-3.5,3.5),breaks=seq(-3.5,3.5,1),expand=c(0,0)) +  scale_x_continuous(name="Z-score of Harvest Price",limits=c(-3.5,3.5),breaks=seq(-3.5,3.5,1),expand=c(0,0))+  theme(panel.grid.minor = element_blank(),axis.line = element_line(color="black"))+geom_vline(xintercept=0,color="red")+geom_hline(yintercept=0,color="red")
-# # 
-# # print(z2)
-# # ggsave("highyear_z2.png")
-# 
-# 
-# # zbin=z_wide%>%
-# #   mutate(bin=cut_interval(hend,length=0.5),probneg=if_else(e_returns<=0,1,0))%>%
-# #   group_by(bin)%>%
-# #   dplyr::summarise(pneg=mean(probneg))
-# # 
-# # z_widebin=z_wide%>%
-# #   mutate(bin=cut_interval(hend,length=0.5))%>%
-# #   left_join(zbin,by=c("bin"))
-# 
-# # z3=ggplot(data=z_widebin)+geom_point(aes(x=hend,y=zreturns))+
-# #   #geom_smooth(method="loess",span=0.2,se=F)+
-# #   geom_smooth(aes(x=hend,y=pneg),method="loess",span=0.2,size=2)+ 
-# #   scale_y_continuous(name="Z-Score of Seasonal Returns",limits=c(-3.5,3.5),breaks=seq(-3.5,3.5,1),expand=c(0,0)) +  scale_x_continuous(name="Z-score of Harvest Price",limits=c(-3.5,3.5),breaks=seq(-3.5,3.5,1),expand=c(0,0))+  theme(panel.grid.minor = element_blank(),axis.line = element_line(color="black"))+geom_vline(xintercept=0,color="red")+geom_hline(yintercept=0,color="red")+
-# #   geom_text(aes(x=2.75,y=1.25,label=c("Probability of \n Negative Returns")))
-# # 
-# # print(z3)
-# # ggsave("highyear_z3.png")
-# 
-# # z2=ggplot()+geom_point(data=z_wide,aes(x=dpct,y=hend))+
-# #   scale_x_continuous(name="Seasonal Returns (%)",limits=c(-100,500),breaks=seq(-100,500,100)) +  scale_y_continuous(name="Harvest Price",limits=c(0,3),breaks=seq(0,3,0.25))+  theme(panel.grid.minor = element_blank(),axis.line = element_line(color="black"))+geom_hline(yintercept=0,color="red")
-# # #+annotate("label",x=max(mh$zscore),y=300,hjust=0.5,label="7 obs over 300% were omitted")
-# # print(z2)
-# # ggsave("highyear_z2_hope.png")
-# 
-# z_wide=z_wide%>%
-#   mutate(country=revalue(country,c("Democratic Republic of the Congo"="DR Congo","Central African Republic"="CAR")))%>%
-#   mutate(market_year=paste0(market,", ",country," (",year,")",sep=""),
-#          bin=if_else(dpct<= -50,"Below -50%",if_else(dpct> -50& dpct <0,"-50-0%",
-#               if_else(dpct>=0 & dpct<50,"0-50%",if_else(dpct>=50& dpct <100,"50-100%",
-#               if_else(dpct>=100 & dpct<150,"100-150%",if_else(dpct>=150& dpct <200,"150-200%",
-#                if_else(dpct>=200 & dpct<250,"200-250%",if_else(dpct>=250& dpct <300,"250-300%",if_else(dpct>=300,"Over 300%",as.character(NA)))))))))))%>%
-#   mutate(bin=as.factor(bin))
-#         
-# z_bottom=z_wide%>%
-# filter(dpct<=-65)%>%
-#   arrange(dpct)%>%
-# filter(market%in%c("Sinende","Tshibamba","Bor"))
-# 
-# z_top=z_wide%>%
-#   filter(dpct>300)%>%
-#   arrange(desc(dpct))%>%
-# filter(market%in%c("Banjul","Beyla","Farafenni"))
-# 
-# hy=ggplot()+geom_point(data=z_wide,aes(x=hend,y=lean,color=bin),size=0.75,alpha=0.75)+
-#   scale_x_continuous(name="Zscore of Harvest Season Price",limits=c(-3.5,3.5),breaks=seq(-3,3,1),expand=c(0,0))+
-#   scale_y_continuous(name="Zscore of Lean Season Price",limits=c(-3.5,3.5),breaks=seq(-3,3,1),expand=c(0,0))+
-#   scale_color_manual(
-#     #values= c("red4","red","lightgreen","green1","green2","green3","green4","forestgreen","darkgreen"),
-#      values= c("red4","red","skyblue1","skyblue3","dodgerblue1","dodgerblue3","blue2","blue4","midnightblue"),
-#     breaks=c("Below -50%", "-50-0%", "0-50%"," 50-100%", "100-150%","150-200%","200-250%","250-300%","Over 300%"),
-#                      name="Seasonal Returns")+
-#  # scale_color_gradient2(midpoint=0,low="green",mid="white",high="blue",guide="colorbar",name="Seasonal Returns (%)",limits=c(-100,400))+
-#   theme(panel.background = element_blank(),panel.grid.major=element_line(color="lightgray"),
-#     panel.grid.minor = element_blank(),axis.line =element_line(color="black"))+   geom_vline(xintercept=0,color="darkgrey")+geom_hline(yintercept=0,color="darkgrey")+
-#   guides(color = guide_legend(reverse = TRUE))+
-# annotate("label",x=-3,y=3,label="I",color="black",family="serif")+
-# annotate("label",x=3,y=3,label="II",color="black",family="serif")+
-# annotate("label",x=3,y=-3,label="III",color="black",family="serif")+
-# annotate("label",x=-3,y=-3,label="IV",color="black",family="serif")+
-#   geom_label_repel(data=z_bottom,aes(hend,lean,label=market_year,hjust =0 ,vjust=0),size =2,color="black")+
-#   geom_point(data=z_bottom,aes(x=hend,y=lean,color=bin),size=3,shape=8,show.legend=FALSE)+
-#   geom_label_repel(data=z_top,aes(hend,lean,label=market_year,hjust = 1,vjust=0),size =2,color="black")+
-# geom_point(data=z_top,aes(x=hend,y=lean,color=bin),size=3,shape=8,show.legend=FALSE)
-#               
-#               
-# print(hy)
-# ggsave("highyear_returns.png")
-# 
-# 
-# #h1=lm(e_returns~-1+hend+lean+factor(year)+factor(country),data=z_wide)
-# #summary(h1)
-# 
-# #stargazer(h1,style="aer",keep.stat = "adj.rsq",align=TRUE,no.space=TRUE,report="vc*")
-# 
-# rm(mh1,mh2,z_widebin,z_long,h1,z1,z2,z3,hy,z_bottom,z_top,z_wide,zbin)
-rm(z1)
-
-```
-
-
-A8. (tbd) PDFs and CDF
-```{r pdf cdf}
-
-# setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/R/output")
-# 
-# pdf_facet=ggplot()+geom_density(data=temp_long,aes(payoff,fill=factor(choice)),alpha=0.5)+
-#   geom_vline(data=mean,aes(xintercept=payoff.mean,colour=choice),linetype="dashed", size=0.5,position="dodge", show.legend=FALSE)+
-#   scale_fill_manual(values=c("blue","gray"),breaks=c("payoff_nostore","payoff_store"),labels=c("No storage","Storage"),name="Choice")+
-#   scale_color_manual(values=c("blue","gray"),breaks=c("payoff_nostore","payoff_store"))+
-#   xlab("Net Payoff over Harvest and Lean Season")+
-#    theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(),
-#          panel.background = element_blank(),axis.line = element_line(color="black"),
-#            legend.justification=c(1,0), legend.position=c(1,0.5))+
-#   ggtitle(paste(clist[i]))
-# 
-# print(pdf_list[[paste("pdf",clist[i])]])
-# ggsave(paste(clist[i],"_pdf.png",sep=""))
-# 
-# 
-# cdf_list[[paste("cdf",clist[i])]]=ggplot()+stat_ecdf(data=temp_long,aes(payoff,color=factor(choice)),geom="step",size=1,position="identity")+
-#   geom_vline(data=mean, aes(xintercept=payoff.mean,colour=choice),linetype="dashed", size=0.5,alpha=0.5,position="dodge",show.legend=FALSE)+
-#  scale_color_manual(values=c("blue","gray"),breaks=c("payoff_nostore","payoff_store"),labels=c("No storage","Storage"),name="Choice")+
-#   #xlab("Net Payoff over Harvest and Lean Season")+
-#    theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(),
-#          panel.background = element_blank(),axis.line = element_line(color="black"),
-#            legend.justification=c(1,0), legend.position=c(1,0.5))+
-#   ggtitle(paste(clist[i]))
-# 
-# print(cdf_list[[paste("cdf",clist[i])]])
-# ggsave(paste(clist[i],"_cdf.png",sep=""))
-
-
-```
-
-
-A9 (tbd) Analysis and output for paper 1: Stochastic dominance
-```{r sd,echo=FALSE,results='asis', message = FALSE}
-# 
-# 
-# setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/R/output")
-# 
-# 
-# #create sequence of storage losses from 0-100%
-# alpha_val=seq(0.00,0.75,by=0.01)
-# 
-# alpha_results=data.frame(country=character(),equal_test=numeric(),e_store=numeric(),e_nostore=numeric(),
-#     FOSD=character(),p_d_within=numeric(),SOSD=character(),p_s_within=numeric(),TOSD=character(),p_t_within=numeric(),alpha=numeric())
-# 
-# 
-# for (a in alpha_val){
-# 
-# maize_dom=more1_maize%>%
-#   #dplyr::select(country,market,year,planting1,hend1,planting2,hend2,yield_kgha)%>%
-#     dplyr::select(country,market,year,lean1,hend1,lean2,hend2,yield_kgha)%>%
-#   mutate(alpha=a,k=.5)%>%
-#   mutate(store_1=yield_kgha*(1-alpha)*lean1-k*ceiling(yield_kgha/50),
-#        nostore_1=yield_kgha*hend1,
-#        store_2=yield_kgha*(1-alpha)*lean2-k*ceiling(yield_kgha/50),
-#      nostore_2=yield_kgha*hend2)%>%
-#   # mutate(store_1=yield_kgha*(1-alpha)*planting1-k*ceiling(yield_kgha/50),
-#   #        nostore_1=yield_kgha*hend1,
-#   #         store_2=yield_kgha*(1-alpha)*planting2-k*ceiling(yield_kgha/50),
-#   #        nostore_2=yield_kgha*hend2)%>%
-#   pivot_longer(cols=store_1:nostore_2,names_to=c(".value","season"),names_sep="_",values_drop_na = TRUE)%>%
-# group_by(country,market,year)%>%
-#   dplyr::summarise(payoff_store=mean(store,na.rm=TRUE),payoff_nostore=mean(nostore,na.rm=TRUE))#average across payoffs for 2 season market-years
-# 
-# #write_dta(maize_dom,"c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Stata/Data/maize_dom_072020.dta")
-# 
-# sd_results=data.frame(country=character(),equal_test=numeric(),e_store=numeric(),e_nostore=numeric(),
-#       p_d_equal=numeric(),d1max=numeric(),d2max=numeric(),d_hat=numeric(),FOSD=character(),p_d_within=numeric(),
-#       p_s_equal=numeric(),s1max=numeric(),s2max=numeric(),s_hat=numeric(),SOSD=character(),p_s_within=numeric(),
-#       p_t_equal=numeric(),t1max=numeric(),t2max=numeric(),t_hat=numeric(),TOSD=character(),p_t_within=numeric())
-# 
-#   
-# clist=unique(maize_dom$country)
-# pdf_list<-list()
-# cdf_list<-list()
-# 
-# #loop over countries
-# for (i in seq_along(clist)){
-# 
-# temp_wide=maize_dom%>%
-#   #filter(country=="Malawi")
-#   filter(country==clist[i])
-#   
-# temp_long=temp_wide%>%
-#   pivot_longer(cols=starts_with("payoff"),names_to="choice",values_to="payoff",values_drop_na = TRUE)%>%
-#   arrange(payoff)
-# 
-# store.ecdf=ecdf(temp_wide$payoff_store)
-# nostore.ecdf=ecdf(temp_wide$payoff_nostore)
-# 
-# n_0 <- length(temp_wide$payoff_store)
-# n_1 <- length(temp_wide$payoff_nostore)
-# n_total=n_0+n_1
-# N=sqrt((n_0*n_1)/(n_total))
-# 
-# plist=unique(temp_long$payoff)
-# 
-# p=data.frame(payoff=plist)%>%
-#   mutate(f1_hat=store.ecdf(payoff), f2_hat=nostore.ecdf(payoff))%>%
-#   mutate(d1=f1_hat-f2_hat,d2=f2_hat-f1_hat)%>%
-#   arrange(payoff)
-# 
-# #p_int=p[-1,]
-# p_int=p[-nrow(p),] #the last line will be equal to 0 by design, so drop it for identifying d1max,d2max, and d_hat_eq
-# 
-# d1max=max(p_int$d1)
-# d2max=max(p_int$d2)
-# d_hat_eq=N*max(d1max,d2max) #this is baseline for the K-S test of equality to compare to d_star_eq generated through Abadie (2002) resampling procedure below
-# d_hat=N*min(d1max,d2max) #this is for FOSD "observation" test, the FOSD test using Massoumi & Heshmati (2000) follows 
-# 
-# #FOSD "observation" test
-# #technically for FOSD, dhat<=0 and d1<0 for atleast *one* payoff implies storing FOSD, so need to account for existence, but not persistence of zero because even if d1max=0 , as long as d2max>0, it means that at least one d1 is negative (and similarly for d2 and no storage scenario)
-# FOSD=if_else(d_hat<=0 & d1max<=0 & d2max>0,"storing",if_else(d_hat<=0 & d2max<=0 & d1max>0,"no storage",if_else(d_hat>0,"no rank",as.character(NA))))
-# 
-# p$s1=cumsum(p$d1)
-# p$s2=cumsum(p$d2)
-# 
-# s1max=max(p$s1)
-# s2max=max(p$s2)
-# s_hat_eq=N*max(s1max,s2max) #this is not used
-# s_hat=N*min(s1max,s2max) #this is for SOSD "observation" test
-# 
-# #SOSD "observation" test (same explanation for above)
-# SOSD=if_else(s_hat<=0 & s1max<=0&s2max>0,"storing",if_else(s_hat<=0 & s2max<=0 & s1max>0,"no storage",if_else(s_hat>0,"no rank",as.character(NA))))
-# 
-# p$t1=cumsum(p$s1)
-# p$t2=cumsum(p$s2)
-# 
-# t1max=max(p$t1)
-# t2max=max(p$t2)
-# t_hat_eq=N*max(t1max,t2max)#this is not used
-# t_hat=N*min(t1max,t2max)#this is for TOSD "observation" test
-# 
-# #TOSD "observation" test
-# TOSD=if_else(t_hat<=0 & t1max<=0& t2max>0,"storing",if_else(t_hat<=0 & t2max<=0 & t1max>0,"no storage",if_else(t_hat>0,"no rank",as.character(NA))))
-# 
-# 
-# ##BOOTSTRAP for test of equality following Abadie (2002)
-# #p-value for d should equal to k1
-# bootresults_equal=data.frame(d_star_eq=numeric(),s_star_eq=numeric(),t_star_eq=numeric())
-# 
-# for(j in 1:500)
-# {
-# 
-# n_0 <- length(temp_wide$payoff_store)
-# n_1 <- length(temp_wide$payoff_nostore)
-# n_total=n_0+n_1
-# n_01=n_0+1
-# N=sqrt((n_0*n_1)/(n_total))
-# 
-# samp=sample(temp_long$payoff,size=n_total,replace=TRUE)
-# samp1=samp[1:n_0]
-# samp2=samp[n_01:n_total]
-# 
-# 
-# store2.ecdf=ecdf(samp1)
-# nostore2.ecdf=ecdf(samp2)
-# 
-# slist=unique(samp)
-# 
-# p2=data.frame(payoff=slist)%>%
-#   mutate(f1_hat=store2.ecdf(payoff), f2_hat=nostore2.ecdf(payoff))%>%
-#   mutate(d1=f1_hat-f2_hat,d2=f2_hat-f1_hat)%>%
-#   arrange(payoff)
-# 
-# #p2_int=p2[-1,]
-# p2_int=p2[-nrow(p2),] #the last line will be equal to 0 by design, so drop it for identifying d1maxx,d2maxx, and d_star_eq
-# 
-# 
-# d1maxx=max(p2_int$d1)
-# d2maxx=max(p2_int$d2)
-# d_star_eq=N*max(d1maxx,d2maxx)
-# 
-# p2$s1=cumsum(p2$d1)
-# p2$s2=cumsum(p2$d2)
-# 
-# s1maxx=max(p2$s1)
-# s2maxx=max(p2$s2)
-# s_star_eq=N*max(s1maxx,s2maxx)
-# 
-# p2$t1=cumsum(p2$s1)
-# p2$t2=cumsum(p2$s2)
-# 
-# t1maxx=max(p2$t1)
-# t2maxx=max(p2$t2)
-# t_star_eq=N*max(t1maxx,t2maxx)
-# 
-# bootresults_equal[j,1]<-d_star_eq
-# bootresults_equal[j,2]<-s_star_eq
-# bootresults_equal[j,3]<-t_star_eq
-# 
-# }
-# 
-# # xlist=c("d","s","t")
-# # 
-# # for (x in xlist)
-# # {
-# # bootresults_equal[[paste0("I",x)]]<-if_else(bootresults_equal[[paste0(x,"_star_eq")]]>paste0(x,"_hat_eq"),1,0)
-# # #paste0("pval_",x,"_equal")<-mean(bootresults_equal[[paste0("I",x)]])
-# # 
-# # }
-# 
-# bootresults_equal$Id=if_else(bootresults_equal$d_star_eq>d_hat_eq,1,0)
-# bootresults_equal$Is=if_else(bootresults_equal$s_star_eq>s_hat_eq,1,0)
-# bootresults_equal$It=if_else(bootresults_equal$t_star_eq>t_hat_eq,1,0)
-# 
-# pval_d_equal=mean(bootresults_equal$Id)
-# pval_s_equal=mean(bootresults_equal$Is)
-# pval_t_equal=mean(bootresults_equal$It)
-# 
-# 
-# #K-S test for equality of distributions
-# k1=ks.boot(temp_wide$payoff_store,temp_wide$payoff_nostore,nboots=500,alternative="t",print.level=0)$ks.boot.pvalue
-# #k1=round(k1,digits=4)
-# 
-# #k2=dgof::ks.test(temp_wide$payoff_store,temp_wide$payoff_nostore,tol=1e-8, simulate.p.value=TRUE, B=500)$ks.test.pvalue
-# #k2=round(k2,digits=4)
-# 
-# 
-# #Resampling within sample only for stochastic dominance tests following M & H (2000)
-# bootresults_within=data.frame(d_star_within=numeric(),s_star_within=numeric(),t_star_within=numeric())
-# 
-# for(h in 1:500)
-# {
-#   
-# n_0 <- length(temp_wide$payoff_store)
-# n_1 <- length(temp_wide$payoff_nostore)
-# n_total=n_0+n_1
-# N=sqrt((n_0*n_1)/(n_total))
-# 
-# samp1=sample(temp_wide$payoff_store,size=n_0,replace=TRUE)
-# samp2=sample(temp_wide$payoff_nostore,size=n_1,replace=TRUE)
-# 
-# store2.ecdf=ecdf(samp1)
-# nostore2.ecdf=ecdf(samp2)
-# 
-# samp=c(samp1,samp2)
-# slist=unique(samp)
-# 
-# p2=data.frame(payoff=slist)%>%
-#   mutate(f1_hat=store2.ecdf(payoff), f2_hat=nostore2.ecdf(payoff))%>%
-#   mutate(d1=f1_hat-f2_hat,d2=f2_hat-f1_hat)%>%
-#   arrange(payoff)
-# 
-# #p2_int=p2[-1,]
-# p2_int=p2[-nrow(p2),]#the last line will be equal to 0 by design, so drop it for identifying d1maxx,d2maxx, and d_star_within
-# 
-# d1maxx=max(p2_int$d1)
-# d2maxx=max(p2_int$d2)
-# d_star_within=N*min(d1maxx,d2maxx)
-# 
-# p2$s1=cumsum(p2$d1)
-# p2$s2=cumsum(p2$d2)
-# 
-# s1maxx=max(p2$s1)
-# s2maxx=max(p2$s2)
-# s_star_within=N*min(s1maxx,s2maxx)
-# 
-# p2$t1=cumsum(p2$s1)
-# p2$t2=cumsum(p2$s2)
-# 
-# t1maxx=max(p2$t1)
-# t2maxx=max(p2$t2)
-# t_star_within=N*min(t1maxx,t2maxx)
-# 
-# bootresults_within[h,1]<-d_star_within
-# bootresults_within[h,2]<-s_star_within
-# bootresults_within[h,3]<-t_star_within
-# 
-# }
-# 
-# bootresults_within$Id=if_else(bootresults_within$d_star_within<=0,1,0)
-# bootresults_within$Is=if_else(bootresults_within$s_star_within<=0,1,0)
-# bootresults_within$It=if_else(bootresults_within$t_star_within<=0,1,0)
-# 
-# # xlist=c("d","s","t")
-# # 
-# # for (x in xlist)
-# # {
-# # bootresults_within[[paste0("I",x)]]<-if_else(bootresults_within[[paste0(x,"_star_eq")]]<=0,1,0)
-# # #paste0("pval_",x,"_equal")<-mean(bootresults_equal[[paste0("I",x)]])
-# # 
-# # }
-# 
-# pval_d_within=mean(bootresults_within$Id)
-# pval_s_within=mean(bootresults_within$Is)
-# pval_t_within=mean(bootresults_within$It)
-# 
-# 
-# e_store<-mean(temp_wide$payoff_store,na.rm=TRUE)
-# e_nostore<-mean(temp_wide$payoff_nostore,na.rm=TRUE)
-# 
-# country_results=data.frame(country=clist[i],k1,e_store,e_nostore,
-#                       pval_d_equal,d1max,d2max,d_hat,FOSD,pval_d_within,
-#                       pval_s_equal,s1max,s2max,s_hat,SOSD,pval_s_within,
-#                       pval_t_equal,t1max,t2max,t_hat,TOSD,pval_t_within)
-# 
-# 
-# sd_results=rbind(sd_results,country_results)
-# 
-# 
-# # pdf_list[[paste("pdf",clist[i])]]=ggplot()+geom_density(data=temp_long,aes(payoff,fill=factor(choice)),alpha=0.5)+
-# #   geom_vline(data=mean,aes(xintercept=payoff.mean,colour=choice),linetype="dashed", size=0.5,position="dodge", show.legend=FALSE)+
-# #   scale_fill_manual(values=c("blue","gray"),breaks=c("payoff_nostore","payoff_store"),labels=c("No storage","Storage"),name="Choice")+
-# #   scale_color_manual(values=c("blue","gray"),breaks=c("payoff_nostore","payoff_store"))+
-# #   xlab("Net Payoff over Harvest and Lean Season")+
-# #    theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(),
-# #          panel.background = element_blank(),axis.line = element_line(color="black"),
-# #            legend.justification=c(1,0), legend.position=c(1,0.5))+
-# #   ggtitle(paste(clist[i]))
-# # 
-# # print(pdf_list[[paste("pdf",clist[i])]])
-# # ggsave(paste(clist[i],"_pdf.png",sep=""))
-# # 
-# # 
-# # cdf_list[[paste("cdf",clist[i])]]=ggplot()+stat_ecdf(data=temp_long,aes(payoff,color=factor(choice)),geom="step",size=1,position="identity")+
-# #   geom_vline(data=mean, aes(xintercept=payoff.mean,colour=choice),linetype="dashed", size=0.5,alpha=0.5,position="dodge",show.legend=FALSE)+
-# #  scale_color_manual(values=c("blue","gray"),breaks=c("payoff_nostore","payoff_store"),labels=c("No storage","Storage"),name="Choice")+
-# #   #xlab("Net Payoff over Harvest and Lean Season")+
-# #    theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(),
-# #          panel.background = element_blank(),axis.line = element_line(color="black"),
-# #            legend.justification=c(1,0), legend.position=c(1,0.5))+
-# #   ggtitle(paste(clist[i]))
-# # 
-# # print(cdf_list[[paste("cdf",clist[i])]])
-# # ggsave(paste(clist[i],"_cdf.png",sep=""))
-# 
-# }
-# 
-# x_results=sd_results%>%
-#   dplyr::select(-contains("equal"),-contains("max"),-contains("hat"))%>%
-#  mutate(alpha=a)
-# 
-# 
-# 
-# 
-# 
-# #alpha_results=rbind(alpha_results,x_results)
-# 
-# alpha_results=rbind(alpha_results,x_results)
-# 
-# #assign(paste("x_results",a,sep="_"),x)
-# 
-# 
-# }
-# 
-# 
-# 
-# 
-# loss_5_lean=alpha_results%>%
-#   filter(alpha==0.05)%>%
-#   # mutate(FOSD_star=if_else(pval_d_within>=0.9&pval_d_within<0.95,"*",if_else(pval_d_within>0.95&pval_d_within<0.99,"**",
-#   #                                                                            if_else(pval_d_within>0.99,"***"," "))),
-#   #        SOSD_star=if_else(pval_s_within>=0.9&pval_s_within<0.95,"*",if_else(pval_s_within>0.95&pval_s_within<0.99,"**",
-#   #                                                                             if_else(pval_s_within>0.99,"***"," "))),
-#   #       TOSD_star=if_else(pval_t_within>=0.9&pval_t_within<0.95,"*",if_else(pval_t_within>0.95&pval_t_within<0.99,"**",                                                                                                                    if_else(pval_t_within>0.99,"***"," "))))%>%
-#   #   mutate(FOSD_star=if_else(FOSD!="no rank"&FOSD_star!=" ",paste0(FOSD,FOSD_star),FOSD_star),
-#   #          SOSD_star=if_else(SOSD!="no rank"&SOSD_star!=" ",paste0(SOSD,SOSD_star),SOSD_star),
-#   #          TOSD_star=if_else(TOSD!="no rank"&TOSD_star!=" ",paste0(TOSD,TOSD_star),TOSD_star),
-#   mutate(FOSD_p=if_else(pval_d_within>=0.9,paste0(FOSD," (",sprintf(pval_d_within,fmt='%#.3f'),")")," "),
-#          SOSD_p=if_else(pval_s_within>=0.9,paste0(SOSD," (",sprintf(pval_s_within,fmt='%#.3f'),")")," "),
-#           TOSD_p=if_else(pval_t_within>=0.9,paste0(SOSD," (",sprintf(pval_t_within,fmt='%#.3f'),")")," "),
-#           e_store=paste0("$",sprintf(e_store,fmt='%#.2f')),e_nostore=paste0("$",sprintf(e_nostore,fmt='%#.2f')),
-#            #e_store=paste0("$",round(e_store,2)),e_nostore=paste0("$",round(e_nostore,2)),
-#          country=revalue(country,c("Democratic Republic of the Congo"="DR Congo")))%>%
-#   dplyr::select(1:4,contains("_p"))
-# 
-# x1=xtable(loss_5_lean,type="latex",auto=TRUE)
-# names(x1)<-c("Country","K-S Test of Equality","E[Payoff_storage])","E[Payoff_no storage]", "FOSD p(d*<=0)","SOSD p(s*<=0)","TOSD p(t*<=0)")
-# align(x1)<-"l|l|c|c|c|c|c|c|"
-# 
-# setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/R/output")
-# print(x1,file="sd_results_lean.tex",digits=3,include.rownames=FALSE)
-# 
-# 
-# # loss_5_planting=alpha_results%>%
-# #   filter(alpha==0.05)%>%
-# #   mutate(FOSD_star=if_else(pval_d_within>=0.9&pval_d_within<0.95,"*",if_else(pval_d_within>0.95&pval_d_within<0.99,"**",
-# #                                                                              if_else(pval_d_within>0.99,"***"," "))),
-# #          SOSD_star=if_else(pval_s_within>=0.9&pval_s_within<0.95,"*",if_else(pval_s_within>0.95&pval_s_within<0.99,"**",
-# #                                                                               if_else(pval_s_within>0.99,"***"," "))), 
-# #         TOSD_star=if_else(pval_t_within>=0.9&pval_t_within<0.95,"*",if_else(pval_t_within>0.95&pval_t_within<0.99,"**",                                                                                                                    if_else(pval_t_within>0.99,"***"," "))))%>%
-# #     mutate(FOSD_star=if_else(FOSD!="no rank"&FOSD_star!=" ",paste0(FOSD,FOSD_star),FOSD_star),
-# #            SOSD_star=if_else(SOSD!="no rank"&SOSD_star!=" ",paste0(SOSD,SOSD_star),SOSD_star),
-# #            TOSD_star=if_else(TOSD!="no rank"&TOSD_star!=" ",paste0(TOSD,TOSD_star),TOSD_star),
-# #            e_store=paste0("$",round(e_store,2)),e_nostore=paste0("$",round(e_nostore,2)))%>%
-# #   dplyr::select(1:4,contains("star"))
-# # 
-# # x2=xtable(loss_5_planting,type="latex")
-# # names(x2)<-c("Country","Test of Equality","E(payoff.store)","E(payoff.nostore)", "FOSD p(d*<=0)","SOSD p(s*<=0)","TOSD p(t*<=0)")
-# # 
-# # setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/R/output")
-# # print(x2,file="sd_results_planting.tex",digits=3,include.rownames=FALSE)
-# 
-# 
-# a_results=alpha_results%>%
-#   arrange(country,alpha)%>%
-#   mutate(f_nostore=if_else(FOSD=="no storage"& pval_d_within>=0.9,alpha,as.numeric(NA)),
-#          s_nostore=if_else(SOSD=="no storage"& pval_s_within>=0.9,alpha,as.numeric(NA)),
-#          t_nostore=if_else(TOSD=="no storage"& pval_t_within>=0.9,alpha,as.numeric(NA)),
-#     f_store=if_else(FOSD=="storing"& pval_d_within>=0.9,alpha,as.numeric(NA)),
-#      s_store=if_else(SOSD=="storing"& pval_s_within>=0.9,alpha,as.numeric(NA)),
-#       t_store=if_else(TOSD=="storing"& pval_t_within>=0.9,alpha,as.numeric(NA)))%>%
-#   group_by(country)%>%
-#   dplyr::summarise(across(f_nostore:t_nostore,min,na.rm=TRUE),across(f_store:t_store,max,na.rm=TRUE))%>%
-#  mutate_if(is.numeric, function(x) ifelse(is.infinite(x),as.numeric(NA),x*100))
-# 
-# alpha_val=seq(0,100,by=1)
-# 
-# order1=c("t_store","s_store","f_store")
-# order2=c("t_nostore","s_nostore","f_nostore")
-# 
-# for (o in order1){
-# for (a in seq_along(alpha_val)){
-#   a_results[[paste("a",a,sep="")]]<-if_else(!is.na(a_results[[o]])&a_results[[o]]>=a,o,a_results[[paste("a",a,sep="")]])
-# }
-# }
-# 
-# for (o in order2){
-# for (a in seq_along(alpha_val)){
-#   a_results[[paste("a",a,sep="")]]<-if_else(!is.na(a_results[[o]])&a_results[[o]]<=a,o,a_results[[paste("a",a,sep="")]])
-# }
-# }
-# 
-# results=a_results%>%
-#   dplyr::select(country,starts_with("a"))%>%
-#  pivot_longer(cols=a1:a101,names_to="loss_pct",values_to="order",values_drop_na = FALSE)%>%
-#   mutate(loss_pct=as.numeric(gsub("a","",loss_pct)),country=revalue(country,c("Democratic Republic of the Congo"="DR Congo")))
-# #%>%
-#   #separate(order,c("level","choice"))%>%
-#   #mutate(l_choice=paste(level,choice,sep="_"))
-# 
-# 
-# #library(extrafont) 
-# #font_import(pattern = "lmodern*") 
-# #loadfonts()
-# sd=ggplot()+
-#     #geom_point(size=1)+
-#   geom_path(data=subset(results,loss_pct<=50),aes(x=loss_pct,y=reorder(country,desc(country)),color=order,group=country),size=2)+
-#  scale_color_manual(name="Stochastic Dominance",values=c("purple4","royalblue","green","red","orange","yellow2","white"),
-#                      breaks=c("f_store","s_store","t_store","f_nostore","s_nostore","t_nostore","NA"),labels=c("Store (FOSD)","Store (SOSD)","Store (TOSD)","No storage (FOSD)","No storage (SOSD)","No storage (TOSD)"," "))+
-#   theme(panel.grid.minor = element_blank(),panel.background = element_blank(),panel.grid.major = element_blank(),
-#          axis.line = element_line(color="black"),axis.title.y = element_blank(),
-#         #axis.text.y = element_blank(),axis.ticks.y=element_blank(),
-#         axis.title.x=element_text(face="bold"),
-#         plot.margin=margin(-0.5,-0.5,-0.5,-0.5,"pt"), panel.margin = unit(0,"null"),
-#         text= element_text(family="serif"))+
-#   scale_x_continuous(name="Storage Loss (%)",limits=c(0,50),breaks=seq(0,50,10),expand=c(0,0),position="top")
-# 
-# print(sd)
-# setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/R/output")
-# ggsave("storageloss.png")
-# 
-# 
-# 
-# # names(loss_5_lean)<-c("Country","K-S Test of\n Equality","Expected Payoff \n storage","Expected Payoff \n no storage", "FOSD\np(d*<=0)","SOSD\np(s*<=0)","TOSD\np(t*<=0)")
-# # 
-# # 
-# # footnotes<-"1:K-S Test: See Section 3.1. For p<0.1, we can reject the null hypothesis of equality of the distributions \n 2:Rank: See Section 3.2. If x≤0, the distribution with x≤0 is observed to be dominant, for x=d,s,t.\n 3. Probability:  See  Section  3.2. If p(x∗)≤0  is  greater  than  or  equal  to  0.9,  we  can  obtain  90%  or  greater  confidence \n that the distribution with x <0 is dominant, for x=d,s,t. n\ The probability is included in parentheses, for probabilities greater than orequal to 0.9."
-# # 
-# # 
-# # theme_1 <- ttheme_minimal(core = list(fg_params = list(hjust = 0, 
-# #                                                            x = 0.1, 
-# #                                                     fontsize = 9)),
-# #                           colhead = list(fg_params = list(fontsize = 12, 
-# #                                                           fontface = "bold")))
-# # 
-# # lg=ggtexttable(loss_5_lean,rows = NULL,theme="classic")%>% 
-# #   tab_add_hline(at.row = 2, row.side = "top", linewidth = 2)%>%
-# #   tab_add_border()%>%
-# #    tab_add_footnote(text = footnotes, size = 10)
-# # 
-# # #g=ggarrange(lg,sd,ncol = 2, nrow = 1,heights=c(2,2),widths=c(4,2),align="h")
-# # #ggsave(g,"storageloss_table.png")
-# # 
-# # 
-# # grid.newpage()
-# # s=ggplotGrob(sd)
-# # lg=tableGrob(loss_5_lean,rows = NULL,theme = theme_1)
-# # 
-# # l=gtable(unit(1:2,c("cm")),unit(5,"cm"))
-# # l         
-# # l=gtable_add_grob(l,lg,1,1)
-# # l=gtable_add_grob(l,s,1,2, clip = "inherit")
-# # 
-# # # th <- sum(lg$heights)
-# # # pg <- arrangeGrob(lg, s, ncol=2,heights = unit.c(th, unit(1,"npc")-th))
-# # # grid.draw(pg)
-# # 
-# # #%>% 
-# #   #tab_add_hline(at.row = 2, row.side = "top", linewidth = 2)%>%
-# #   #tab_add_border()%>%
-# #    #tab_add_footnote(text = footnotes, size = 10)
-# # 
-# # lg=tableGrob(loss_5_lean,rows = NULL,theme = theme_1)%>%
-# #   tab_add_border()%>%
-# #   tab_add_footnote(text = footnotes, size = 10)
-# # 
-# # grid.newpage()
-# # figA=arrangeGrob(lg,ncol=1,heights=c(10,1))
-# # figB=arrangeGrob(sd,ncol=1,heights=c(10,1))
-# # finalfig=ggarrange(figA,figB,align="v")
-# 
-# 
-# 
-# rm(samp,samp1,samp2,store2.ecdf,nostore2.ecdf,n_01,n_total,slist,h,i,j,country_results,temp_long,temp_wide,plist,k1,k2,N,n_0,n_1,FOSD,SOSD,TOSD,store.ecdf,nostore.ecdf,p,p2,p2_int,bootresults_equal,bootresults_within,mean,a,alpha_val,e_nostore,e_store,loss,x_results,p_int,o,order1,order2)
-# rm(list=ls(pattern="pval"))
-# rm(list=ls(pattern="star"))
-# rm(list=ls(pattern="max"))
-# rm(list=ls(pattern="hat"))
-# rm(list=ls(pattern="maxx"))
-
-
-```
-
-
 
 
 
