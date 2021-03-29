@@ -767,7 +767,7 @@ n_yrs=season%>%
 summary(n_yrs$n_yrs)
 #range: 2-20, median 6, IQR 4-11
 
-nrow(subset(n_yrs,n_yrs>=6)) # 664 markets left
+nrow(subset(n_yrs,n_yrs>=6)) # 437 markets left
 
 pvar<-function(x){
   y= mean((x-mean(x))^2)
@@ -778,10 +778,10 @@ ex_price=season%>%
   filter(market_type=="Retail"& !is.na(returns1_c))%>%
   mutate(return=returns1_c,pl=pmax1,ph=hmin1)%>%
   group_by(country,market)%>%
-  filter(n()>=6)%>% #keep markets with 4 or more market years
+  filter(n()>=6)%>% #keep markets with 6 or more market years
   ungroup()%>%
   group_by(country)%>%
- filter(length(unique(market))>=4)%>%
+ filter(length(unique(market))>=3)%>% #drop 3 countries with only 1 or 2 markets
     ungroup()%>%
   group_by(country,market)%>%
   arrange(country,market)%>%
@@ -790,6 +790,7 @@ ex_price=season%>%
   dplyr::select(1:6,pl,e.pl,ph,v.pl,return,e.return,v.return,v2.return)%>%
   mutate(minr.nostore=2*e.return/v.return)
  # mutate(minr.nostore=2*(e.pl/v.pl)*(e.pl-ph))
+
 
 ex_price_c=ex_price%>%
   group_by(country)%>%
@@ -860,6 +861,11 @@ minr_country=rbind(minr_country,minr_tot)%>%
 
 
 #separate the data frames by analysis
+
+#storage uptake percent by risk tolerance group (no credit/interest rate)
+nostore_0=sim_country%>%
+  dplyr::select(country,n_mkt,starts_with("nostore.0"))
+
 #storage uptake percent by risk tolerance group (no credit/interest rate)
 nostore_r0=sim_country%>%
   dplyr::select(country,n_mkt,starts_with("nostore.r0"))
@@ -874,8 +880,11 @@ minr_nostore=minr_country%>%
 
 setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
 
-sim_table_grp=xtable(nostore_r0,auto=TRUE,type="latex")
+sim_table_grp=xtable(nostore_0,auto=TRUE,type="latex")
 print(sim_table_grp,file=paste0("./nostore_riskgrp_",format(Sys.Date(),"%d_%m_%y"),".tex"),include.rownames=FALSE)
+
+sim_table_grp=xtable(nostore_r0,auto=TRUE,type="latex")
+print(sim_table_grp,file=paste0("./nostore_riskgrp_r",format(Sys.Date(),"%d_%m_%y"),".tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
 print(sim_table_grp,file=paste0("./nostore_i_riskgrp_",format(Sys.Date(),"%d_%m_%y"),".tex"),include.rownames=FALSE)
@@ -920,27 +929,38 @@ rm(list=ls(pattern="minr"))
 ```
 
 
-15. Predicted lean season price and certainty equivalent/risk aversion (not updated 3/23)
+15. Predicted lean season price and certainty equivalent/risk aversion (drop)
 ```{r sdresults='asis', message = FALSE,include=FALSE}
 
+#filter season for 431 markets
+presplit=season%>%
+  filter(market_type=="Retail"& !is.na(returns1_c))%>%
+  group_by(country,market)%>%
+  filter(n()>=6)%>% #keep markets with 6 or more market years
+  ungroup()%>%
+  group_by(country)%>%
+ filter(length(unique(market))>=4)%>% #drop 3 countries with only 1 or 2 markets
+    ungroup()
 
-split.df=split(extreme1,extreme1$country)
-country.name=names(split.df)
+
+split.df=split(presplit,paste(presplit$country,presplit$market))
+
+cm.name=names(split.df)
 #results<-list()
-table3=data.frame(country=as.character(),coef=as.numeric())
+table3=data.frame(country_mkt=as.character(),coef=as.numeric())
 
-for (i in 1:length(country.name)){
+for (i in 1:length(cm.name)){
 df=split.df[[i]]
-cname=country.name[[i]]
-m=lm(pmax1~factor(cropyear)+hmin1,data=df)
+cname=cm.name[[i]]
+m=lm(returns1_c~hmin1,data=df)
 #s=summary(m)
 #coef=s$coefficients[,1]
 #cprep=data.frame(cname,coef)
 #table3=rbind(table3,cprep)
 p_df=df%>%
-  dplyr::select(country,market,cropyear,hmin1)
+  dplyr::select(country,market,cropyear,hmin1,returns1_c)
 
-p_df$p_pl=predict(m,newdata=p_df)
+p_df$p_returns1_c=predict(m,newdata=p_df)
 
 table3=rbind(table3,p_df)
 
@@ -950,55 +970,49 @@ table3=rbind(table3,p_df)
 ######Returns by country (dotplot) vs prediction
 
 
-
 #returns to main season
-p_risk1=table3%>%
-  dplyr::rename(ph=hmin1)
+p_risk1=table3
 
 ex_price=p_risk1%>%
-  arrange(country)%>%
-  group_by(country)%>%
-  dplyr::mutate_at("p_pl",funs(e.pl=mean,v.pl=var))%>%
+  arrange(country,market)%>%
+  group_by(country,market)%>%
+  dplyr::mutate_at("p_returns1_c",funs(e.preturn=mean,v2.preturn=pvar))%>%
   ungroup()
+
+ex_price_c=ex_price%>%
+  group_by(country)%>%
+dplyr::summarise(n_mkt=length(unique(market)))
 
 #create sequence of risk aversion coefficients 
 sim_rr=seq(0,5,by=0.1)
 
 #create certainty equivalent by risk aversion coefficient and evaluate storage choice
 sim=expand_grid(ex_price,sim_rr)%>%
-  mutate(ce=e.pl-((sim_rr*v.pl)/(2*e.pl)))%>%
-  mutate(nostore.0=if_else(ph>ce,1,0))%>%
+  mutate(cr=e.preturn-((sim_rr*v2.preturn)/2))%>%
+  mutate(nostore.r0=if_else(cr<=0,1,0))%>%
   dplyr::mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))
 
-#market averages by risk coefficient
+
+
+#calculate market averages for storage avoidance by risk coefficient
 sim_mkt=sim%>%
    group_by(country,market,sim_rr)%>%
   dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_mkt"))%>%
   ungroup()
 
-#country averages over market averages by risk coefficient
+  
+#calculate country averages over market averages for storage avoidance by risk coefficients and aggregate by risk tolerance group
 sim_country=sim_mkt%>%
    group_by(country,sim_rr)%>%
- dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
+  dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
   ungroup()%>%
-   dplyr::mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))%>%
+  mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))%>%
+  filter(!is.na(bin))%>%
   group_by(country,bin)%>%
    dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE))%>%
   ungroup()%>%
- pivot_wider(names_from =bin,values_from=c("nostore.0_mkt_c"))%>%
-  dplyr::select(1:4)
+ pivot_wider(names_from =bin,values_from=c("nostore.r0_mkt_c"))
 
-#country averages over all observations by risk coefficient
-sim_country_all=sim%>%
-   group_by(country,sim_rr)%>%
- dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
-  ungroup()%>%
-   dplyr::mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))%>%
-  group_by(country,bin)%>%
-   dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE))%>%
-  ungroup()%>%
- pivot_wider(names_from =bin,values_from=c("nostore.0_c"))%>%
-  dplyr::select(1:4)
 
 #calculate total rows and add to dataframes
 sim_tot=sim_country%>%
@@ -1007,18 +1021,17 @@ sim_tot=sim_country%>%
   dplyr::select(country,everything())
  
 sim_country=rbind(sim_country,sim_tot)%>%
-  dplyr::mutate(across(where(is.numeric),~paste0(sprintf("%.1f",.*100),"%")))
-
-sim_tot_all=sim_country_all%>%
-  dplyr::summarise(across(where(is.numeric),mean,na.rm=TRUE))%>%
-  mutate(country="Total")%>%
-  dplyr::select(country,everything())
- 
-sim_country_all=rbind(sim_country_all,sim_tot_all)%>%
-  dplyr::mutate(across(where(is.numeric),~paste0(sprintf("%.1f",.*100),"%")))
+   dplyr::mutate(across(2:4,~paste0(sprintf("%.1f",.*100),"%")))%>%
+  left_join(ex_price_c,by=c("country"))
 
 
-table_grp=xtable(sim_country_all,auto=TRUE,type="latex")
+#separate the data frames by analysis
+#storage uptake percent by risk tolerance group (no credit/interest rate)
+nostore_r0=sim_country%>%
+  dplyr::select(country,n_mkt,everything())
+
+
+table_grp=xtable(sim_country,auto=TRUE,type="latex")
 print(table_grp,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/nostore_pred",format(Sys.Date(),"%d_%m_%y"),".tex"),include.rownames=FALSE)
 
 
@@ -1083,12 +1096,12 @@ A2. Malawi Case Study
 setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
 
 #Retail Price Trend Tables
-malawi_mkt4=season%>%
+malawi_mkt6=season%>%
   filter(country=="Malawi"&market_type=="Retail")%>%
    group_by(country,region,market)%>%
-  filter(n()>4)
+  filter(n()>6)
 
-mlist=unique(malawi_mkt10$market)
+mlist=unique(malawi_mkt6$market)
   
 pctp=function(x){
   y=mean(x[x>0],na.rm=TRUE)
@@ -1099,7 +1112,7 @@ pctn=function(x){
 }
 
 #Seasonal returns (market level)
-malawi_mkt=malawi_mkt10%>%
+malawi_mkt=malawi_mkt6%>%
    group_by(country,region,market)%>%
   filter(n()>4)%>%
    dplyr::summarise(across(starts_with("returns1_c"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
@@ -1176,7 +1189,7 @@ ggsave("malawi_plot_minmax.PNG",width=12,height=9)
 #CE analysis by market for Malawi
 
 #returns to main season
-ex_price=malawi_mkt4%>%
+ex_price=malawi_mkt6%>%
   mutate(return=returns1_c,pl=pmax1,ph=hmin1)%>%
   arrange(market)%>%
   group_by(market)%>%
@@ -1207,6 +1220,9 @@ sim_mkt_all=sim%>%
   ungroup()%>%
  pivot_wider(names_from =bin,values_from=c("nostore.0_c","nostore.r0_c"))%>%
   dplyr::mutate(across(3:5,~paste0(sprintf("%.1f",.*100),"%")))
+
+sim_mkt_r=sim_mkt_all%>%
+  dplyr::select(1,2,starts_with("nostore.r0"))
 
 sim_table_grp=xtable(sim_mkt_all,auto=TRUE,type="latex")
 print(sim_table_grp,file=paste0("./Malawi_riskgrp_",format(Sys.Date(),"%d_%m_%y"),".tex"),include.rownames=FALSE)
