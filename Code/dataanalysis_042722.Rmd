@@ -1,0 +1,2359 @@
+---
+title: "Data Analysis"
+author: "Lila Cardell"
+date: "04/27/22"
+output: html_document
+---
+
+
+Load packages
+```{r setup, include=FALSE}
+
+#library(installr)
+#updateR()
+
+if (!require("pacman")) install.packages("pacman")
+
+pacman::p_load(data.table,tidyr,plyr,dplyr,readxl,haven,janitor,stringr,lubridate,foreign,stargazer,survey,xtable,fuzzyjoin,
+               knitr,tables,car,outliers,styler,magrittr,sjmisc,ggplot2,ggbur,ggnewscale,scales,quantmod,distr6,forcats,tibble,
+               ggrepel,gdata,stringdist,moments,mfx,marginaleffects,rsq,rnaturalearth,rnaturalearthdata,styler,sjmisc,
+               magrittr,labelled,stringdist,fixest,tidygeocoder,BBmisc,blorr,DescTools,tseries,kableExtra)
+pacman::p_update()
+
+options(scipen=999,warn=-1)
+set.seed(101484)
+
+knitr::opts_chunk$set(
+	message = FALSE,
+	warning = FALSE,
+	include = FALSE,
+	root.dir = "C:/Users/lilac2/Box/GIEWS_Project/GIEWS/R"
+)
+
+
+
+```
+
+
+0. Import dataset and combine with producer prices
+```{r import0,include=FALSE,warning=FALSE}
+
+## Clear worksace
+rm(list = ls())
+gc()
+
+setwd("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final")
+
+maize_prices<-read_dta("./Data/Clean Data/maizegeoprices_042722.dta")
+prod_prices<-read_dta("./Data/Clean Data/prod_prices_131221.dta")
+cropdata<-read_dta("./Data/Clean Data/cropdata_042722.dta")
+seasons<-read_dta("./Data/Clean Data/seasons.dta")%>%mutate(country=revalue(country,c("Swaziland"="Eswatini","Cape Verde"="Cabo Verde")))
+
+
+allprices<-full_join(maize_prices,prod_prices,by=c("country","market","market_type","commodity","year","month"))
+
+missingcpi=maize_prices%>%#3096 observations from Somalia and a few from South Sudan
+   filter(is.na(price_real_kg))
+ 
+#evidence of extreme outliers/errors, no luck through mad scores or zscores or any other thoughtful approach so by hand is necessary
+##there is an error in 6 markets in Cameroon for January 2021, I think the price listed is per kg, not per 15KG, drop them
+maize_nom<-maize_prices%>%
+  filter(!is.na(price_kg))%>%
+filter(!(market=="Kirundo"&year==2015&month==1&commodity=="Maize (white)"&market_type=="Retail"),
+         !(market=="Kasempa"&year==2020&month==3&commodity=="Maize (white)"&market_type=="Retail"),
+       !(market=="Kentzou"&year==2020&month==9&commodity=="Maize"&market_type=="Retail"),
+       !(market=="Mosantu premier"&year==2020&month==2&commodity=="Maize"&market_type=="Retail"),
+       !(market=="Kitule gare"&year==2020&month==2&commodity=="Maize"&market_type=="Retail"),
+       !(market=="Kissidougou"&year==2017&month==6&commodity=="Maize"&market_type=="Retail"),
+       !(market=="Koforidua"&year==2021&month==5&commodity=="Maize (yellow)"&market_type=="Wholesale"),
+       !(market=="Kayogoro"&year==2016&month==10&commodity=="Maize (white)"&market_type=="Retail"),
+        !(market=="Batouri"&year==2020&month==9&commodity=="Maize"&market_type=="Retail"),
+        !(country=="Cameroon"&year==2021&month==1&market %in% c("Douala-Marche Central","Douala-Bonaberi","Douala-Sandaga","Yaounde-Mokolo","Yaounde-Mfoundi","Yaounde-Marche 8e")))
+
+
+
+#create set with real prices
+maize_real<-maize_nom%>%
+   filter(!is.na(price_real_kg))
+  
+
+rm(missingcpi,maize_prices)
+
+```
+
+
+
+1. Look at measures of skewness and kurtosis 
+```{r skew1,echo=FALSE}
+
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+
+skew_mkt=maize_real%>%
+  #unite("z",country,region,commodity,market_type,market,sep="_")%>%
+  #filter(z%in%mlist)%>%
+  #separate(z,c("country","region","commodity","market_type","market"),sep="_")%>%
+  group_by(country,commodity,market,market_type)%>%
+  dplyr::summarise(nobs=n(),cv=(sd(price_real_kg)/mean(price_real_kg)),
+                   skew=skewness(price_real_kg),kurt=kurtosis(price_real_kg))%>%
+  mutate(n_skew=if_else(skew<=0,1,0),n_kurt=if_else(kurt<=0,1,0))%>%
+  ungroup()
+
+#no evidence of negative kurtosis in any markets
+
+
+skew_country=skew_mkt%>%
+  group_by(country,commodity,market_type)%>%
+  dplyr::summarise(across(c(cv,kurt,skew),mean,na.rm=TRUE),across(starts_with("n"),sum,na.rm=TRUE),n_mkt=n())%>%
+  dplyr::mutate(n_skew_pct=n_skew/n_mkt,n_kurt_pct=n_kurt/n_mkt)%>%
+   ungroup()%>%
+  dplyr::select(country,commodity,market_type,n_mkt,cv,skew,n_skew_pct)%>%
+plyr::mutate(country=revalue(country,c("Democratic Republic of the Congo"="DR Congo")))
+
+sum_retail=skew_mkt%>%
+    filter(market_type=="Retail")%>%
+  dplyr::summarise(across(c(cv,kurt,skew),mean,na.rm=TRUE),across(starts_with("n"),sum,na.rm=TRUE),n_mkt=n())%>%
+  dplyr::mutate(n_skew_pct=n_skew/n_mkt,n_kurt_pct=n_kurt/n_mkt)%>%
+  dplyr::mutate(country="Total",commodity="")%>%
+dplyr::select(country,commodity,n_mkt,cv,skew,n_skew_pct)
+
+skew_retail=skew_country%>%
+  filter(market_type=="Retail")%>%
+   dplyr::select(-market_type)%>%
+  rbind(sum_retail)%>%
+  dplyr::mutate(across(c(n_skew_pct),~paste0(sprintf("%.1f",.*100),"%")),across(c(cv,skew),round,3))
+  
+sum_wholesale=skew_mkt%>%
+    filter(market_type=="Wholesale")%>%
+  dplyr::summarise(across(c(cv,kurt,skew),mean,na.rm=TRUE),across(starts_with("n"),sum,na.rm=TRUE),n_mkt=n())%>%
+  dplyr::mutate(n_skew_pct=n_skew/n_mkt,n_kurt_pct=n_kurt/n_mkt)%>%
+  dplyr::mutate(country="Total",commodity="")%>%
+dplyr::select(country,commodity,n_mkt,cv,skew,n_skew_pct)
+ 
+skew_wholesale=skew_country%>%
+  filter(market_type=="Wholesale")%>%
+  dplyr::select(-market_type)%>%
+  rbind(sum_wholesale)%>%
+  dplyr::mutate(across(c(n_skew_pct),~paste0(sprintf("%.1f",.*100),"%")),across(c(cv,skew),round,3))
+
+print=xtable(skew_retail,type="latex")
+names(print)<-c("Country","Commodity","Markets","CV","Average Market Skewness ","Percent Markets Negative Skew")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/skew_retail_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+print=xtable(skew_wholesale,type="latex")
+names(print)<-c("Country","Commodity","Markets","CV","Average Market Skewness ","Percent Markets Negative Skew")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/skew_wholesale_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+rm(skew_mkt,skew_country,print,skew_retail,skew_wholesale,sum_retail,sum_wholesale)
+
+```
+
+
+
+
+2. Map of markets
+```{r map2,echo=FALSE,warning=FALSE,message=FALSE}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+
+markets=maize_real%>%
+  dplyr::select(country,market,market_type,lat,lon)%>%
+   mutate(country=gsub("Democratic Republic of the Congo","DR Congo",country))%>%
+  mutate(country=gsub("Central African Republic","CAR",country))
+
+countries=markets%>%
+  group_by(country)%>%
+  dplyr::summarise(across(lat:lon,mean))
+
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+ggplot(data = world) +
+    geom_sf(fill="antiquewhite") +
+    geom_point(data=markets, aes(x = lon, y = lat,fill=market_type), size = 1, 
+        shape = 23)+
+   geom_label_repel(data = countries, aes(x=lon,y=lat, label = country), size =2,nudge_x= 0.15,
+    direction    = "y",
+    segment.size = 0.2)+
+    coord_sf(xlim = c(-20,50), ylim = c(-35, 25))+
+  theme(panel.grid.major = element_line(color = gray(0.5), linetype = "dashed", 
+        size = 0.25), panel.background = element_rect(fill = "aliceblue"),
+        legend.position=c(0.35,0.35),legend.background = element_rect(fill="aliceblue"),legend.title=element_blank(),
+        axis.text.x=element_blank(),axis.ticks.x=element_blank(),axis.title.x=element_blank(),
+        axis.text.y=element_blank(),axis.ticks.y=element_blank(),axis.title.y=element_blank())
+
+
+ggsave("market_map.PNG",width=12,height=9)
+
+rm(markets,countries,world)
+
+```
+
+
+3. Assign planting and harvest season months
+```{r assign3,echo=FALSE,warning=FALSE,message=FALSE,results='hide'}
+
+#Reminder: note h1x,h2x,p1x,p2x if planting or harvest seasons that cross the end of the year, e.g. harvest starts in Dec and ends in Jan 
+maize_real<-maize_real%>%
+   mutate(yyyymm=paste(year,formatC(month,width=2,flag="0"),sep="-"))%>%
+  mutate(monthtype1=if_else(note_p1x==0&month>=main_plant_start & month<=main_plant_end,paste0("planting1_",year),#for nonwrapped planting season
+                          if_else(note_p1x==1&month>=main_plant_start,paste0("planting1_",year), #for months at the end of the year
+                          if_else(note_p1x==1&month<=main_plant_end,paste0("planting1_",year-1), #assume months at the beginning of the year belong with prior year's planting season
+                    if_else(note_h1x==0&month>=main_harvest_start & month<=main_harvest_end,paste0("harvest1_",year),#for nonwrapped harvest season
+                            if_else(note_h1x==1&month>=main_harvest_start,paste0("harvest1_",year), #for months at the end of the year
+                               if_else(note_h1x==1&month<=main_harvest_end,paste0("harvest1_",year-1),"")))))),#assume months at the beginning of the year belong with prior year's harvest season
+      monthtype2=if_else(note_p2x==0&month>=second_plant_start & month<=second_plant_end,paste0("planting2_",year), #for nonwrapped planting season
+                               if_else(note_p2x==1&month>=second_plant_start,paste0("planting2_",year), #for months at the end of the year
+                               if_else(note_p2x==1&month<=second_plant_end,paste0("planting2_",year-1), #for months at the beginning of the year
+                       if_else(note_h2x==0&month>=second_harvest_start & month<=second_harvest_end,paste0("harvest2_",year),#for nonwrapped harvest season
+                               if_else(note_h2x==1&month>=second_harvest_start,paste0("harvest2_",year), #for months at the end of the year
+                               if_else(note_h2x==1&month<=second_harvest_end,paste0("harvest2_",year-1),"")))))))%>% #for months at the beginning of the year
+   mutate(date=parse_date_time(yyyymm,"ym"))%>%
+  dplyr::select(country,region,market,lat,lon,commodity,market_type,currency,year,month,price_real_kg,monthtype1,monthtype2,contains("harvest"),date)
+
+
+#repeat for nominal
+maize_nom<-maize_nom%>%
+   mutate(yyyymm=paste(year,formatC(month,width=2,flag="0"),sep="-"))%>%
+  mutate(monthtype1=if_else(note_p1x==0&month>=main_plant_start & month<=main_plant_end,paste0("planting1_",year),#for nonwrapped planting season
+                          if_else(note_p1x==1&month>=main_plant_start,paste0("planting1_",year), #for months at the end of the year
+                          if_else(note_p1x==1&month<=main_plant_end,paste0("planting1_",year-1), #assume months at the beginning of the year belong with prior year's planting season
+                    if_else(note_h1x==0&month>=main_harvest_start & month<=main_harvest_end,paste0("harvest1_",year),#for nonwrapped harvest season
+                            if_else(note_h1x==1&month>=main_harvest_start,paste0("harvest1_",year), #for months at the end of the year
+                               if_else(note_h1x==1&month<=main_harvest_end,paste0("harvest1_",year-1),"")))))),#assume months at the beginning of the year belong with prior year's harvest season
+      monthtype2=if_else(note_p2x==0&month>=second_plant_start & month<=second_plant_end,paste0("planting2_",year), #for nonwrapped planting season
+                               if_else(note_p2x==1&month>=second_plant_start,paste0("planting2_",year), #for months at the end of the year
+                               if_else(note_p2x==1&month<=second_plant_end,paste0("planting2_",year-1), #for months at the beginning of the year
+                       if_else(note_h2x==0&month>=second_harvest_start & month<=second_harvest_end,paste0("harvest2_",year),#for nonwrapped harvest season
+                               if_else(note_h2x==1&month>=second_harvest_start,paste0("harvest2_",year), #for months at the end of the year
+                               if_else(note_h2x==1&month<=second_harvest_end,paste0("harvest2_",year-1),"")))))))%>% #for months at the beginning of the year
+   mutate(date=parse_date_time(yyyymm,"ym"))%>%
+  dplyr::select(country,region,market,lat,lon,commodity,market_type,currency,year,month,price_kg,monthtype1,monthtype2,contains("harvest"),date)
+
+
+single=unlist(seasons%>%
+                group_by(country)%>%dplyr::summarise(main=min(main_harvest_start,na.rm=TRUE),second=min(second_harvest_start,na.rm=TRUE))%>%
+                filter(is.finite(main)&!is.finite(second))%>%dplyr::select(country))
+  
+double=unlist(seasons%>%
+                group_by(country)%>%dplyr::summarise(main=min(main_harvest_start,na.rm=TRUE),second=min(second_harvest_start,na.rm=TRUE))%>%
+                filter(is.finite(main)&is.finite(second))%>%dplyr::select(country))
+
+
+rm(seasons)
+
+```
+
+
+
+4. Calculate returns from min harvest to max "lean season" (3 months pre-harvest)
+```{r harvest4,echo=FALSE,include=FALSE}
+
+#isolate the month of harvest begin for the main season and make a full set for all years and markets
+beginharvest1=maize_real%>%
+   unite("temp",c("country","region","market","commodity","market_type","main_harvest_start"),sep="_")%>%
+  dplyr::select(temp)%>%
+group_by(temp)%>%
+  slice(1)%>%
+  ungroup()
+
+years=seq(2000,2021,by=1)
+beginharvest1=expand.grid(beginharvest1$temp,years,stringsAsFactors = TRUE)%>%
+  separate("Var1",c("country","region","market","commodity","market_type","main_harvest_start"),sep="_")%>%
+  mutate(hbegin1=paste(Var2,formatC(main_harvest_start,width=2,flag="0"),sep="-"))%>%
+         mutate(hbegin_date1=parse_date_time(hbegin1,"ym"))%>%
+  dplyr::select(1:5,hbegin_date1)
+
+#repeat for second season
+beginharvest2=maize_real%>%
+   unite("temp",c("country","region","market","commodity","market_type","main_harvest_start"),sep="_")%>%
+  dplyr::select(temp)%>%
+group_by(temp)%>%
+  slice(1)%>%
+  ungroup()
+
+beginharvest2=expand.grid(beginharvest2$temp,years,stringsAsFactors = TRUE)%>%
+  separate("Var1",c("country","region","market","commodity","market_type","second_harvest_start"),sep="_")%>%
+  mutate(hbegin2=paste(Var2,formatC(second_harvest_start,width=2,flag="0"),sep="-"))%>%
+         mutate(hbegin_date2=parse_date_time(hbegin2,"ym"))%>%
+  dplyr::select(1:5,hbegin_date2)
+
+
+
+#rejoin the harvest month begin and identify the three months prior to harvest, and the maximum price during that period and calculate returns
+lean1=maize_real%>%  
+  left_join(beginharvest1,by=c("country","region","market","commodity","market_type"))%>%
+    mutate(duration1=interval(hbegin_date1,date))%>%
+       mutate(duration1=duration1%/%months(1))%>%  
+      filter(duration1%in%-3:-1)%>%
+  mutate(monthtype1=paste0("lean1_",year(hbegin_date1)-1))%>% #shift the lean season year to reflect the prior year harvest
+  group_by(country,region,commodity,market_type,market,monthtype1)%>% #group by lean season crop year to find the price within the lean seasons for that crop year
+  dplyr::summarise(lmax1=max(price_real_kg,na.rm=TRUE),lmin1=min(price_real_kg,na.rm=TRUE))%>%    
+  ungroup()%>%
+  unite("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+   separate(monthtype1,c("monthtype1","cropyear"),"_")%>%
+  mutate(cropyear=as.numeric(cropyear))%>%
+  dplyr::select(temp,cropyear,lmax1,lmin1)
+  
+#which month is the lean
+
+#repeat for second season
+lean2=maize_real%>%  
+  left_join(beginharvest2,by=c("country","region","market","commodity","market_type"))%>%
+  mutate(duration2=interval(hbegin_date2,date))%>%
+       mutate(duration2=duration2%/%months(1))%>%  
+      filter(duration2%in%-3:-1)%>%
+  mutate(monthtype2=paste0("lean2_",year(hbegin_date2)-1))%>%#shift the lean season year to reflect the prior year harvest
+  group_by(country,region,commodity,market_type,market,monthtype2)%>% #group by crop year to find the price within lean months for that crop year
+  dplyr::summarise(lmax2=max(price_real_kg,na.rm=TRUE),lmin2=min(price_real_kg,na.rm=TRUE))%>%    
+  ungroup()%>%
+  unite("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+  separate(monthtype2,c("monthtype2","cropyear"),"_")%>%
+  mutate(cropyear=as.numeric(cropyear))%>%
+  dplyr::select(temp,cropyear,lmax2,lmin2)
+
+
+#find min and max harvest price (main season)
+harvest1 = maize_real%>% 
+   separate(monthtype1,c("monthtype1","cropyear"),"_")%>%
+  mutate(cropyear=as.numeric(cropyear))%>%
+  filter(monthtype1=="harvest1")%>% #find all the harvest months for the main season
+  arrange(country,region,commodity,market_type,market,year,month)
+
+
+harvest1_minmax=harvest1%>% 
+  group_by(country,region,commodity,market_type,market,cropyear,monthtype1)%>% #group by crop year to find the price within harvest months for that crop year
+  dplyr::summarise(minprice=min(price_real_kg,na.rm=TRUE),maxprice=max(price_real_kg,na.rm=TRUE))%>%    
+  ungroup()%>%
+    unite("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+  pivot_wider(names_from = monthtype1,values_from=c("minprice","maxprice"))%>%
+  dplyr::rename(hmin1=minprice_harvest1,hmax1=maxprice_harvest1)%>%
+  dplyr::select(temp,cropyear,hmin1,hmax1)
+
+
+#find min and max harvest price (second season)
+harvest2 = maize_real%>% 
+   separate(monthtype2,c("monthtype2","cropyear"),"_")%>%
+  mutate(cropyear=as.numeric(cropyear))%>%
+  filter(monthtype2=="harvest2")%>% #find all the harvest months for the main season
+  arrange(country,region,commodity,market_type,market,year,month)
+
+harvest2_minmax=harvest2%>% 
+  group_by(country,region,commodity,market_type,market,cropyear,monthtype2)%>% #group by crop year to find the price within harvest months for that crop year
+  dplyr::summarise(minprice=min(price_real_kg,na.rm=TRUE),maxprice=max(price_real_kg,na.rm=TRUE))%>%    
+  ungroup()%>%
+    unite("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+  pivot_wider(names_from = monthtype2,values_from=c("minprice","maxprice"))%>%
+  dplyr::rename(hmin2=minprice_harvest2,hmax2=maxprice_harvest2)%>%
+  dplyr::select(temp,cropyear,hmin2,hmax2)
+
+
+###connect and calculate returns
+returns1=full_join(lean1,harvest1_minmax,by=c("temp","cropyear"))%>%
+  mutate(returns1=(lmax1-hmin1)/hmin1,  #calculate max returns
+         noarb1=if_else(lmax1<=hmin1,1,0))
+
+#repeat for second season
+returns2=full_join(lean2,harvest2_minmax,by=c("temp","cropyear"))%>%
+  mutate(returns2=(lmax2-hmin2)/hmin2,  #calculate returns
+         noarb2=if_else(lmax2<=hmin2,1,0))
+
+#rejoin the returns 
+returns_con=full_join(returns1,returns2,by=c("temp","cropyear"))%>%
+  separate("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+  arrange(country,region,market,commodity,market_type,cropyear)%>%
+  left_join(cropdata,by=c("country","cropyear"="year"))
+
+
+rm(harvest1_minmax,harvest2_minmax,lean1,lean2,beginharvest1,beginharvest2,years,returns1,returns2)
+
+```
+
+
+4.nom. Calculate returns from min harvest to max "lean season" (3 months pre-harvest) for nominal prices
+```{r harvest4,echo=FALSE,include=FALSE}
+
+#isolate the month of harvest begin for the main season and make a full set for all years and markets
+beginharvest1n=maize_nom%>%
+   unite("temp",c("country","region","market","commodity","market_type","main_harvest_start"),sep="_")%>%
+  dplyr::select(temp)%>%
+group_by(temp)%>%
+  slice(1)%>%
+  ungroup()
+
+years=seq(2000,2021,by=1)
+beginharvest1n=expand.grid(beginharvest1n$temp,years,stringsAsFactors = TRUE)%>%
+  separate("Var1",c("country","region","market","commodity","market_type","main_harvest_start"),sep="_")%>%
+  mutate(hbegin1=paste(Var2,formatC(main_harvest_start,width=2,flag="0"),sep="-"))%>%
+         mutate(hbegin_date1=parse_date_time(hbegin1,"ym"))%>%
+  dplyr::select(1:5,hbegin_date1)
+
+#repeat for second season
+beginharvest2n=maize_nom%>%
+   unite("temp",c("country","region","market","commodity","market_type","main_harvest_start"),sep="_")%>%
+  dplyr::select(temp)%>%
+group_by(temp)%>%
+  slice(1)%>%
+  ungroup()
+
+beginharvest2n=expand.grid(beginharvest2n$temp,years,stringsAsFactors = TRUE)%>%
+  separate("Var1",c("country","region","market","commodity","market_type","second_harvest_start"),sep="_")%>%
+  mutate(hbegin2=paste(Var2,formatC(second_harvest_start,width=2,flag="0"),sep="-"))%>%
+         mutate(hbegin_date2=parse_date_time(hbegin2,"ym"))%>%
+  dplyr::select(1:5,hbegin_date2)
+
+
+
+#rejoin the harvest month begin and identify the three months prior to harvest, and the maximum price during that period and calculate returns
+lean1n=maize_nom%>%  
+  left_join(beginharvest1n,by=c("country","region","market","commodity","market_type"))%>%
+    mutate(duration1=interval(hbegin_date1,date))%>%
+       mutate(duration1=duration1%/%months(1))%>%  
+      filter(duration1%in%-3:-1)%>%
+  mutate(monthtype1=paste0("lean1_",year(hbegin_date1)-1))%>% #shift the lean season year to reflect the prior year harvest
+  group_by(country,region,commodity,market_type,market,monthtype1)%>% #group by lean season crop year to find the price within the lean seasons for that crop year
+  dplyr::summarise(lmax1=max(price_kg,na.rm=TRUE),lmin1=min(price_kg,na.rm=TRUE))%>%    
+  ungroup()%>%
+  unite("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+   separate(monthtype1,c("monthtype1","cropyear"),"_")%>%
+  mutate(cropyear=as.numeric(cropyear))%>%
+  dplyr::select(temp,cropyear,lmax1,lmin1)
+  
+#which month is the lean
+
+#repeat for second season
+lean2n=maize_nom%>%  
+  left_join(beginharvest2n,by=c("country","region","market","commodity","market_type"))%>%
+  mutate(duration2=interval(hbegin_date2,date))%>%
+       mutate(duration2=duration2%/%months(1))%>%  
+      filter(duration2%in%-3:-1)%>%
+  mutate(monthtype2=paste0("lean2_",year(hbegin_date2)-1))%>%#shift the lean season year to reflect the prior year harvest
+  group_by(country,region,commodity,market_type,market,monthtype2)%>% #group by crop year to find the price within lean months for that crop year
+  dplyr::summarise(lmax2=max(price_kg,na.rm=TRUE),lmin2=min(price_kg,na.rm=TRUE))%>%    
+  ungroup()%>%
+  unite("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+  separate(monthtype2,c("monthtype2","cropyear"),"_")%>%
+  mutate(cropyear=as.numeric(cropyear))%>%
+  dplyr::select(temp,cropyear,lmax2,lmin2)
+
+
+#find min and max harvest price (main season)
+harvest1n = maize_nom%>% 
+   separate(monthtype1,c("monthtype1","cropyear"),"_")%>%
+  mutate(cropyear=as.numeric(cropyear))%>%
+  filter(monthtype1=="harvest1")%>% #find all the harvest months for the main season
+  arrange(country,region,commodity,market_type,market,year,month)
+
+
+harvest1n_minmax=harvest1n%>% 
+  group_by(country,region,commodity,market_type,market,cropyear,monthtype1)%>% #group by crop year to find the price within harvest months for that crop year
+  dplyr::summarise(minprice=min(price_kg,na.rm=TRUE),maxprice=max(price_kg,na.rm=TRUE))%>%    
+  ungroup()%>%
+    unite("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+  pivot_wider(names_from = monthtype1,values_from=c("minprice","maxprice"))%>%
+  dplyr::rename(hmin1=minprice_harvest1,hmax1=maxprice_harvest1)%>%
+  dplyr::select(temp,cropyear,hmin1,hmax1)
+
+
+#find min and max harvest price (second season)
+harvest2n = maize_nom%>% 
+   separate(monthtype2,c("monthtype2","cropyear"),"_")%>%
+  mutate(cropyear=as.numeric(cropyear))%>%
+  filter(monthtype2=="harvest2")%>% #find all the harvest months for the main season
+  arrange(country,region,commodity,market_type,market,year,month)
+
+harvest2n_minmax=harvest2n%>% 
+  group_by(country,region,commodity,market_type,market,cropyear,monthtype2)%>% #group by crop year to find the price within harvest months for that crop year
+  dplyr::summarise(minprice=min(price_kg,na.rm=TRUE),maxprice=max(price_kg,na.rm=TRUE))%>%    
+  ungroup()%>%
+    unite("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+  pivot_wider(names_from = monthtype2,values_from=c("minprice","maxprice"))%>%
+  dplyr::rename(hmin2=minprice_harvest2,hmax2=maxprice_harvest2)%>%
+  dplyr::select(temp,cropyear,hmin2,hmax2)
+
+
+###connect and calculate returns
+returns1n=full_join(lean1n,harvest1n_minmax,by=c("temp","cropyear"))%>%
+  mutate(returns1=(lmax1-hmin1)/hmin1,  #calculate max returns
+         noarb1=if_else(lmax1<=hmin1,1,0))
+
+#repeat for second season
+returns2n=full_join(lean2n,harvest2n_minmax,by=c("temp","cropyear"))%>%
+  mutate(returns2=(lmax2-hmin2)/hmin2,  #calculate returns
+         noarb2=if_else(lmax2<=hmin2,1,0))
+
+#rejoin the returns 
+returnsn_con=full_join(returns1n,returns2n,by=c("temp","cropyear"))%>%
+  separate("temp",c("country","region","market","commodity","market_type"),sep="_")%>%
+  arrange(country,region,market,commodity,market_type,cropyear)%>%
+  left_join(cropdata,by=c("country","cropyear"="year"))
+
+
+rm(harvest1n_minmax,harvest2n_minmax,lean1n,lean2n,beginharvest1n,beginharvest2n,years,returns1n,returns2n,harvest1n,harvest2n)
+
+```
+
+
+
+
+5. Calculate intratemporal returns by varying the number of months after harvest end (only real)
+```{r duration5,echo=FALSE,include=FALSE}
+
+#isolate the month of harvest end for the main season and determine the price decile for the country and market type
+harvest1_end=harvest1%>%
+  filter(month==main_harvest_end)%>%
+  mutate(hend1=price_real_kg,hend=paste(cropyear,formatC(month,width=2,flag="0"),sep="-"))%>%
+  mutate(hend_date1=parse_date_time(hend,"ym"))%>%
+ dplyr::select(country,region,market,commodity,market_type,cropyear,hend_date1,hend1)
+  
+
+#repeat for second season
+harvest2_end = harvest2%>%
+  filter(month==second_harvest_end)%>%
+  mutate(hend2=price_real_kg,hend=paste(cropyear,formatC(month,width=2,flag="0"),sep="-"))%>%
+  mutate(hend_date2=parse_date_time(hend,"ym"))%>%
+ dplyr::select(country,region,market,commodity,market_type,cropyear,hend_date2,hend2)
+
+
+#rejoin the harvest month end and calculate returns for every month from the harvest end, keeping only the months within a year after harvest, and calculate returns
+returns_dur1=maize_real%>%  
+  left_join(harvest1_end,by=c("country","region","market","commodity","market_type"))%>%
+  mutate(duration1=interval(hend_date1,date),returns1=(price_real_kg-hend1)/hend1,arb1=if_else(price_real_kg>hend1,1,0))%>%
+  mutate(duration1=duration1%/%months(1),noarb1=if_else(arb1==0,1,0))%>%
+  filter(duration1%in%1:11)%>%
+  left_join(cropdata,by=c("country","cropyear"="year"))%>%
+  dplyr::select(-contains("_harvest_"),-contains("monthtype"))
+
+write_dta(returns_dur1,paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Data/Clean Data/returns_dur1_",format(Sys.Date(),"%d%m%y"),".dta"))
+
+#repeat for second season
+returns_dur2=maize_real%>%
+  left_join(harvest2_end,by=c("country","region","market","commodity","market_type"))%>%
+    mutate(duration2=interval(hend_date2,date),returns2=(price_real_kg-hend2)/hend2,arb2=if_else(price_real_kg>hend2,1,0))%>%
+  mutate(duration2=duration2%/%months(1),noarb2=if_else(arb2==0,1,0))%>%
+filter(duration2%in%1:11)%>%
+    left_join(cropdata,by=c("country","cropyear"="year"))%>%
+  dplyr::select(-lat,-lon,-currency,-contains("_harvest_"),-contains("monthtype"))
+
+#rejoin the returns 
+# returns_dur=full_join(returns_dur1,returns_dur2,by=c("country","region","market","commodity","market_type","year","month","price_real_kg","date"))%>%
+#       arrange(country,region,market,commodity,year,month)
+
+
+
+
+rm(harvest1,harvest2,harvest1_end,harvest2_end)
+
+```
+
+
+
+6. Create summary data sets
+```{r summary6,echo=FALSE}
+
+pctp=function(x){
+  y=mean(x[x>0],na.rm=TRUE)
+}
+
+pctn=function(x){
+  y=mean(x[x<=0],na.rm=TRUE)
+}
+
+
+#Seasonal returns (MARKET LEVEL)
+season_mkt=returns_con%>%
+  group_by(country,region,commodity,market_type,market)%>%
+  dplyr::summarise(across(contains("returns"),list(e=mean),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                  across(starts_with("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                  n.yrs1=length(cropyear[is.finite(returns1)]),n.yrs2=length(cropyear[is.finite(returns2)]))%>%
+  ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),
+         pct_season2=if_else(n.yrs2>0,n_season_noarb2/n.yrs2,as.numeric(NA))
+         )%>%
+ dplyr::select(-contains("n_"))%>%
+  filter(n.yrs1>0|n.yrs2>0)
+
+
+
+#Seasonal returns (MARKET LEVEL) NOMINAL
+season_mktn=returnsn_con%>%
+  group_by(country,region,commodity,market_type,market)%>%
+  dplyr::summarise(across(contains("returns"),list(e=mean),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                  across(starts_with("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                  n.yrs1=length(cropyear[is.finite(returns1)]),n.yrs2=length(cropyear[is.finite(returns2)]))%>%
+  ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),
+         pct_season2=if_else(n.yrs2>0,n_season_noarb2/n.yrs2,as.numeric(NA))
+         )%>%
+ dplyr::select(-contains("n_"))%>%
+  filter(n.yrs1>0|n.yrs2>0)
+
+```
+
+
+7. Print summary datasets
+```{r print7,echo=FALSE}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
+#code could be streamlined)
+
+
+#Seasonal returns (COUNTRYLEVEL) for single season markets
+season_country1=returns_con%>%
+  filter(country%in%single)%>%
+  group_by(country,commodity,market_type)%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                   n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)])
+                          )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA))
+         )%>%
+  dplyr::select(-starts_with("n_"))
+
+#make a list of years covered
+all_years1=returns_con%>%
+ filter(country%in%single)%>%
+  arrange(country,commodity,market_type,cropyear)%>%
+  group_by(country,commodity,market_type)%>%
+  dplyr::summarise(minyr=min(cropyear),maxyr=max(cropyear))%>%
+  mutate(years=paste(minyr,maxyr,sep="-"))%>%
+dplyr::select(country,commodity,market_type,years)%>%
+  ungroup()
+ 
+#add list of years to country data
+season_country1=season_country1%>%
+  left_join(all_years1,by=c("country","commodity","market_type"))%>%
+  dplyr::select(country,commodity,market_type,years,contains("1"))%>%
+  filter(n.yrs1>0)
+
+
+
+#Seasonal returns (COUNTRYLEVEL) for double season markets
+season_country12=returns_con%>%
+  filter(country%in%double)%>%
+  group_by(country,commodity,market_type)%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                  n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                  n.mkt2=length(unique(interaction(market,commodity)[is.finite(returns2)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)]),
+                   n.yrs2=length(interaction(market,commodity)[is.finite(returns2)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),
+         pct_season2=if_else(n.yrs2>0,n_season_noarb2/n.yrs2,as.numeric(NA))
+         )%>%
+  dplyr::select(-starts_with("n_"))
+
+#make a list of years covered
+all_years12=returns_con%>%
+  filter(country%in%double)%>% 
+arrange(country,commodity,market_type,cropyear)%>%
+  group_by(country,commodity,market_type)%>%
+  dplyr::summarise(minyr=min(cropyear),maxyr=max(cropyear))%>%
+  mutate(years=paste(minyr,maxyr,sep="-"))%>%
+dplyr::select(country,commodity,market_type,years)%>%
+  ungroup()
+ 
+#add list of years to country data
+season_country12=season_country12%>%
+  left_join(all_years12,by=c("country","commodity","market_type"))%>%
+  dplyr::select(country,commodity,market_type,years,contains("1"),contains("2"))%>%
+  filter(n.yrs1>0|n.yrs2>0)
+
+
+
+
+#summary datasets
+sum_retail1=returns_con%>%
+  filter(country%in%single&market_type=="Retail")%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                   n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),country="Total",commodity="",years="")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1)
+
+
+
+sum_retail12=returns_con%>%
+  filter(country%in%double&market_type=="Retail")%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                  n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                  n.mkt2=length(unique(interaction(market,commodity)[is.finite(returns2)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)]),
+                   n.yrs2=length(interaction(market,commodity)[is.finite(returns2)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),
+         pct_season2=if_else(n.yrs2>0,n_season_noarb2/n.yrs2,as.numeric(NA)),
+         country="Total",commodity="",years="")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1,n.mkt2,n.yrs2,pct_season2,e.returns2,pos.returns2,neg.returns2)
+
+sum_wholesale1=returns_con%>%
+  filter(country%in%single&market_type=="Wholesale")%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                   n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),country="Total",commodity="",years="")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1)
+
+sum_wholesale12=returns_con%>%
+  filter(country%in%double&market_type=="Wholesale")%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                  n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                  n.mkt2=length(unique(interaction(market,commodity)[is.finite(returns2)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)]),
+                   n.yrs2=length(interaction(market,commodity)[is.finite(returns2)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),
+         pct_season2=if_else(n.yrs2>0,n_season_noarb2/n.yrs2,as.numeric(NA)),
+         country="Total",commodity="",years="")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1,n.mkt2,n.yrs2,pct_season2,e.returns2,pos.returns2,neg.returns2)
+
+season_country1[is.na(season_country1)]=0
+season_country12[is.na(season_country12)]=0
+
+#retail
+retail1=season_country1%>%
+  filter(market_type=="Retail")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1)%>%
+  rbind(sum_retail1)%>%
+  dplyr::mutate(across(contains("pct"),~paste0(sprintf("%.1f",.*100),"%")),across(contains("returns"),~paste0(sprintf("%.1f",.*100),"%")))
+
+retail12=season_country12%>%
+  filter(market_type=="Retail")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1,n.mkt2,n.yrs2,pct_season2,e.returns2,pos.returns2,neg.returns2)%>%
+  rbind(sum_retail12)%>%
+  dplyr::mutate(across(contains("pct"),~paste0(sprintf("%.1f",.*100),"%")),across(contains("returns"),~paste0(sprintf("%.1f",.*100),"%")),
+                country=revalue(country,c("Democratic Republic of the Congo"="DR Congo")))
+
+
+#wholesale
+wholesale1=season_country1%>%
+filter(market_type=="Wholesale")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1)%>%
+  rbind(sum_wholesale1)%>%
+  dplyr::mutate(across(contains("pct"),~paste0(sprintf("%.1f",.*100),"%")),across(contains("returns"),~paste0(sprintf("%.1f",.*100),"%")))
+
+
+wholesale12=season_country12%>%
+  filter(market_type=="Wholesale")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1,n.mkt2,n.yrs2,pct_season2,e.returns2,pos.returns2,neg.returns2)%>%
+  rbind(sum_wholesale12)%>%
+  dplyr::mutate(across(contains("pct"),~paste0(sprintf("%.1f",.*100),"%")),across(contains("returns"),~paste0(sprintf("%.1f",.*100),"%")))
+
+
+
+header1<-c("Country","Commodity","Years",
+           "Markets","Market-Years","Frequency of Negative Returns","Average Total Returns","Average Positive Returns","Average Negative Returns")
+
+header12<-c("Country","Commodity","Years",
+           "Markets","Market-Years","Frequency of Negative Returns","Average Total Returns","Average Positive Returns","Average Negative Returns",
+           "Markets","Market-Years","Frequency of Negative Returns","Average Total Returns","Average Positive Returns","Average Negative Returns")
+
+
+print=xtable(retail1,type="latex")
+names(print)<-header1
+print(print,file=paste0("./retailprices_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+print=xtable(retail12,type="latex")
+names(print)<-header12
+print(print,file=paste0("./retailprices_double_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+print=xtable(wholesale1,type="latex")
+names(print)<-header1
+print(print,file=paste0("./wholesaleprices_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+print=xtable(wholesale12,type="latex")
+names(print)<-header12
+print(print,file=paste0("./wholesaleprices_double_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+###ltd for presentations
+# #main season (retail)
+# retail1_ltd=retail1%>%
+#   dplyr::select(country,e.returns1,pct_season1,neg.returns1)
+# 
+# print=xtable(retail1_ltd,type="latex")
+# names(print)<-c("Country","Average Total Returns","Frequency of Negative Returns","Average Negative Returns")
+# print(print,file=paste0("./retailprices_ltd_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+rm(list=ls(pattern="sum_"),retail1,retail12,wholesale1,wholesale12,print,header1,header12,season_country1,season_country12,all_years1,all_years12)
+
+```
+
+
+
+
+7.nom. Print summary datasets (repeat for nominal)
+```{r print7,echo=FALSE}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
+
+
+#Seasonal returns (COUNTRYLEVEL) for single season markets
+season_country1=returnsn_con%>%
+  filter(country%in%single)%>%
+  group_by(country,commodity,market_type)%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                   n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)])
+                          )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA))
+         )%>%
+  dplyr::select(-starts_with("n_"))
+
+#make a list of years covered
+all_years1=returnsn_con%>%
+ filter(country%in%single)%>%
+  arrange(country,commodity,market_type,cropyear)%>%
+  group_by(country,commodity,market_type)%>%
+  dplyr::summarise(minyr=min(cropyear),maxyr=max(cropyear))%>%
+  mutate(years=paste(minyr,maxyr,sep="-"))%>%
+dplyr::select(country,commodity,market_type,years)%>%
+  ungroup()
+ 
+#add list of years to country data
+season_country1=season_country1%>%
+  left_join(all_years1,by=c("country","commodity","market_type"))%>%
+  dplyr::select(country,commodity,market_type,years,contains("1"))%>%
+  filter(n.yrs1>0)
+
+
+
+#Seasonal returns (COUNTRYLEVEL) for double season markets
+season_country12=returnsn_con%>%
+  filter(country%in%double)%>%
+  group_by(country,commodity,market_type)%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                  n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                  n.mkt2=length(unique(interaction(market,commodity)[is.finite(returns2)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)]),
+                   n.yrs2=length(interaction(market,commodity)[is.finite(returns2)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),
+         pct_season2=if_else(n.yrs2>0,n_season_noarb2/n.yrs2,as.numeric(NA))
+         )%>%
+  dplyr::select(-starts_with("n_"))
+
+#make a list of years covered
+all_years12=returnsn_con%>%
+  filter(country%in%double)%>% 
+arrange(country,commodity,market_type,cropyear)%>%
+  group_by(country,commodity,market_type)%>%
+  dplyr::summarise(minyr=min(cropyear),maxyr=max(cropyear))%>%
+  mutate(years=paste(minyr,maxyr,sep="-"))%>%
+dplyr::select(country,commodity,market_type,years)%>%
+  ungroup()
+ 
+#add list of years to country data
+season_country12=season_country12%>%
+  left_join(all_years12,by=c("country","commodity","market_type"))%>%
+  dplyr::select(country,commodity,market_type,years,contains("1"),contains("2"))%>%
+  filter(n.yrs1>0|n.yrs2>0)
+
+
+#summary datasets
+sum_retail1=returnsn_con%>%
+  filter(country%in%single&market_type=="Retail")%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                   n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),country="Total",commodity="",years="")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1)
+
+
+
+sum_retail12=returnsn_con%>%
+  filter(country%in%double&market_type=="Retail")%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                  n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                  n.mkt2=length(unique(interaction(market,commodity)[is.finite(returns2)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)]),
+                   n.yrs2=length(interaction(market,commodity)[is.finite(returns2)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),
+         pct_season2=if_else(n.yrs2>0,n_season_noarb2/n.yrs2,as.numeric(NA)),
+         country="Total",commodity="",years="")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1,n.mkt2,n.yrs2,pct_season2,e.returns2,pos.returns2,neg.returns2)
+
+sum_wholesale1=returnsn_con%>%
+  filter(country%in%single&market_type=="Wholesale")%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                   n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),country="Total",commodity="",years="")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1)
+
+sum_wholesale12=returnsn_con%>%
+  filter(country%in%double&market_type=="Wholesale")%>%
+   dplyr::summarise(across(contains("returns"),list(e=mean,pos=~pctp(.x),neg=~pctn(.x)),na.rm=TRUE,.names = "{.fn}.{.col}"),
+                    across(contains("noarb"),~sum(.x,na.rm=TRUE),.names = "n_season_{.col}"),
+                  n.mkt1=length(unique(interaction(market,commodity)[is.finite(returns1)])),
+                  n.mkt2=length(unique(interaction(market,commodity)[is.finite(returns2)])),
+                   n.yrs1=length(interaction(market,commodity)[is.finite(returns1)]),
+                   n.yrs2=length(interaction(market,commodity)[is.finite(returns2)])
+                   )%>%
+       ungroup()%>%
+  mutate(pct_season1=if_else(n.yrs1>0,n_season_noarb1/n.yrs1,as.numeric(NA)),
+         pct_season2=if_else(n.yrs2>0,n_season_noarb2/n.yrs2,as.numeric(NA)),
+         country="Total",commodity="",years="")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1,n.mkt2,n.yrs2,pct_season2,e.returns2,pos.returns2,neg.returns2)
+
+season_country1[is.na(season_country1)]=0
+season_country12[is.na(season_country12)]=0
+
+#retail
+retail1=season_country1%>%
+  filter(market_type=="Retail")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1)%>%
+  rbind(sum_retail1)%>%
+  dplyr::mutate(across(contains("pct"),~paste0(sprintf("%.1f",.*100),"%")),across(contains("returns"),~paste0(sprintf("%.1f",.*100),"%")))
+
+retail12=season_country12%>%
+  filter(market_type=="Retail")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1,n.mkt2,n.yrs2,pct_season2,e.returns2,pos.returns2,neg.returns2)%>%
+  rbind(sum_retail12)%>%
+  dplyr::mutate(across(contains("pct"),~paste0(sprintf("%.1f",.*100),"%")),across(contains("returns"),~paste0(sprintf("%.1f",.*100),"%")),
+                country=revalue(country,c("Democratic Republic of the Congo"="DR Congo")))
+
+
+#wholesale
+wholesale1=season_country1%>%
+filter(market_type=="Wholesale")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1)%>%
+  rbind(sum_wholesale1)%>%
+  dplyr::mutate(across(contains("pct"),~paste0(sprintf("%.1f",.*100),"%")),across(contains("returns"),~paste0(sprintf("%.1f",.*100),"%")))
+
+
+wholesale12=season_country12%>%
+  filter(market_type=="Wholesale")%>%
+  dplyr::select(country,commodity,years,n.mkt1,n.yrs1,pct_season1,e.returns1,pos.returns1,neg.returns1,n.mkt2,n.yrs2,pct_season2,e.returns2,pos.returns2,neg.returns2)%>%
+  rbind(sum_wholesale12)%>%
+  dplyr::mutate(across(contains("pct"),~paste0(sprintf("%.1f",.*100),"%")),across(contains("returns"),~paste0(sprintf("%.1f",.*100),"%")))
+
+
+
+header1<-c("Country","Commodity","Years", 
+           "Markets","Market-Years","Frequency of Negative Returns (nom)","Average Total Returns (nom)","Average Positive Returns (nom)","Average Negative Returns (nom)")
+
+header12<-c("Country","Commodity","Years",
+           "Markets","Market-Years","Frequency of Negative Returns (nom)","Average Total Returns (nom)","Average Positive Returns (nom)","Average Negative Returns (nom)",
+           "Markets","Market-Years","Frequency of Negative Returns (nom)","Average Total Returns (nom)","Average Positive Returns (nom)","Average Negative Returns (nom)")
+
+
+print=xtable(retail1,type="latex")
+names(print)<-header1
+print(print,file=paste0("./retailprices_single_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+print=xtable(retail12,type="latex")
+names(print)<-header12
+print(print,file=paste0("./retailprices_double_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+print=xtable(wholesale1,type="latex")
+names(print)<-header1
+print(print,file=paste0("./wholesaleprices_single_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+print=xtable(wholesale12,type="latex")
+names(print)<-header12
+print(print,file=paste0("./wholesaleprices_double_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+###ltd for presentations
+# #main season (retail)
+# retail1_ltd=retail1%>%
+#   dplyr::select(country,e.returns1,pct_season1,neg.returns1)
+# 
+# print=xtable(retail1_ltd,type="latex")
+# names(print)<-c("Country","Average Total Returns","Frequency of Negative Returns","Average Negative Returns")
+# print(print,file=paste0("./retailprices_ltd_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+rm(list=ls(pattern="sum_"),retail1,retail12,wholesale1,wholesale12,print,header1,header12,season_country1,season_country12,all_years1,all_years12)
+
+```
+
+
+
+
+
+8. Data availability (real)
+```{r missing8,echo=FALSE,include=FALSE}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+
+###all markets
+mstats=maize_real%>%
+  group_by(country,commodity,market_type)%>%
+  dplyr::summarise(n_years=n_distinct(year),n_mkt=n_distinct(market))%>%
+  ungroup()%>%
+ dplyr::mutate(seasons=if_else(country%in%single,"single","double"))
+
+#post identification of crop year, note missing data
+missing=returns_con%>%
+  group_by(country,region,commodity,market_type,market)%>%
+  dplyr::summarise(n.yrs1=length(cropyear[is.finite(returns1)]),n.yrs2=length(cropyear[is.finite(returns2)]))%>%
+  ungroup()%>%
+  group_by(country,commodity,market_type)%>%
+  dplyr::summarise(n_mkt_1y_main=n_distinct(market[n.yrs1>=1]),n_mkt_1y_sec=n_distinct(market[n.yrs2>=1]),
+                   n_mkt_5y_main=n_distinct(market[n.yrs1>=5]),n_mkt_5y_sec=n_distinct(market[n.yrs2>=5]))%>%
+ ungroup()%>%
+ dplyr::mutate(seasons=if_else(country%in%single,"single","double"))
+
+mstats=left_join(mstats,missing,by=c("country","commodity","market_type","seasons"))%>%
+  mutate(country=revalue(country,c("Democratic Republic of the Congo"="DR Congo","Central African Republic"="CAR")))
+
+
+mstats1_retail=mstats%>%
+  filter(market_type=="Retail"&seasons=="single")%>%
+  dplyr::select(-market_type,-seasons,-contains("_sec"))%>%
+  dplyr::bind_rows(dplyr::summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+  
+
+print=xtable(mstats1_retail,type="latex")
+names(print)<-c("Country","Commodity","Total Years","Total Markets","N markets 1+ years","N markets 5+ years")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingstats_single_retail_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+mstats1_wholesale=mstats%>%
+  filter(market_type=="Wholesale"&seasons=="single")%>%
+  dplyr::select(-market_type,-seasons,-contains("_sec"))%>%
+  dplyr::bind_rows(dplyr::summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+
+
+print=xtable(mstats1_wholesale,type="latex")
+names(print)<-c("Country","Commodity","Total Years","Total Markets","N markets 1+ years","N markets 5+ years")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingstats_single_wholesale_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+mstats12_retail=mstats%>%
+  filter(market_type=="Retail"&seasons=="double")%>%
+  dplyr::select(-market_type,-seasons)%>%
+  dplyr::bind_rows(dplyr::summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+
+
+print=xtable(mstats12_retail,type="latex")
+names(print)<-c("Country","Commodity","Total Years","Total Markets","Main N markets 1+ years","Main N markets 5+ years","Second N markets 1+ years","Second N markets 5+ years")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingstats_double_retail_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+mstats12_wholesale=mstats%>%
+  filter(market_type=="Wholesale"&seasons=="double")%>%
+  dplyr::select(-market_type,-seasons)%>%
+  dplyr::bind_rows(dplyr::summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+
+
+print=xtable(mstats12_wholesale,type="latex")
+names(print)<-c("Country","Commodity","Total Years","Total Markets","Main N markets 1+ years","Main N markets 5+ years","Second N markets 1+ years","Second N markets 5+ years")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingstats_double_wholesale_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+
+#chart of final data by market and season
+stats_all=returns_con%>%
+  group_by(country,region,market,market_type)%>%
+  dplyr::summarise(n.yrs1=length(cropyear[is.finite(returns1)]),n.yrs2=length(cropyear[is.finite(returns2)]))%>%
+  ungroup()%>%
+  group_by(country,market_type)%>%
+  dplyr::summarise(n_mkt_main_1y=n_distinct(market[n.yrs1>=1]),n_obs_main=sum(n.yrs1),n_mkt_second_1y=n_distinct(market[n.yrs2>=1]),n_obs_second=sum(n.yrs2))%>%  
+ ungroup()%>%
+  dplyr::mutate(season=if_else(country%in%single,"oneseason","twoseason"))%>%
+ group_by(market_type,season)%>%
+  dplyr::summarise(n_country=n(),across(starts_with("n"),sum))%>%
+  ungroup()%>%
+  group_by(market_type)%>%
+  dplyr::bind_rows(dplyr::summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))%>%
+  ungroup()%>%
+  arrange(market_type)
+
+stats_all=stats_all%>%
+  add_row(market_type="Total",season="",n_country=length(unique(returns_con$country)),
+          n_mkt_main_1y=sum(stats_all$n_mkt_main_1y[stats_all$season=="Total"]),
+          n_obs_main=sum(stats_all$n_obs_main[stats_all$season=="Total"]),
+          n_mkt_second_1y=sum(stats_all$n_mkt_second_1y[stats_all$season=="Total"]),
+          n_obs_second=sum(stats_all$n_obs_second[stats_all$season=="Total"]))
+
+
+
+print=xtable(stats_all,type="latex")
+names(print)<-c("Market Type","Season","Number of Countries",
+                "Number of Unique Markets n/ Primary Season","Number of Market-Year Observations n/ Primary Season",
+                "Number of Unique Markets n/ Secondary Season","Number of Market-Year Observations n/ Secondary Season")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/stats_all_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+rm(list=ls(pattern="mstats"),print,stats_all,missing)
+   
+```
+
+
+9. Missingness analysis
+```{r missing9,echo=FALSE}
+
+
+#analyze causes of missingness in primary season retail markets(single season)
+missing1=returns_con%>%
+   filter(market_type=="Retail"&country%in%single)%>%
+  mutate(status=if_else(is.finite(hmin1)&is.finite(lmax1),"both prices exist",
+                         if_else(is.na(hmin1)&is.finite(lmax1),"no harvest price",
+                                 if_else(is.finite(hmin1)&is.na(lmax1),"no lean price","neither"))),
+         returns_yn=if_else(is.finite(returns1),1,0),country=as.factor(country))%>%
+  #mutate(country=revalue(country,c("Democratic Republic of the Congo"="DR Congo","Central African Republic"="CAR")))%>%
+  dplyr::select(country,region,market,commodity,cropyear,status,returns1,returns_yn)
+
+#avg returns
+missing_m1=missing1%>%
+  group_by(country)%>%
+  dplyr::summarise(meanreturn=mean(returns1,na.rm=TRUE))%>%
+  filter(is.finite(meanreturn))%>%
+  ungroup()
+
+missing_mm=missing_m1%>%
+  add_row(country="Overall average",meanreturn=mean(missing1$returns1,na.rm=TRUE))%>%
+  dplyr::mutate(across(contains("return"),~paste0(sprintf("%.1f",.*100),"%")))
+
+missing1$country=fct_infreq(missing1$country)  
+
+t1=missing1%>%
+  tabyl(country,status,show_na=FALSE)%>%
+   #adorn_totals(c("row","col"))%>%
+   adorn_totals(c("row"))%>%
+  adorn_percentages("row") %>%
+  adorn_pct_formatting(digits = 1) %>%
+  adorn_ns()%>%
+  as.tibble()%>%
+  full_join(missing_mm,by="country")
+
+t1[is.na(t1)]=""
+
+#regress returns on missingness
+#t-test prob of missingenness more likely to be harvest or lean
+
+test=missing1%>%
+  dplyr::select(1:6)%>%
+  dplyr::filter(status%in%c("no lean price","no harvest price")&country!="Sierra Leone")%>%
+  unite(country,1:4,sep="_")%>%
+  dplyr::mutate_all(~as.factor(.))%>%
+  tabyl(country,status)%>%
+  adorn_percentages("row")%>%
+  pivot_longer(2:3,names_to="status",values_to="value",names_transform = list(status=as.factor))%>%
+  as.data.frame()%>%
+  separate("country",c("country","region","market","commodity"),sep="_")%>%
+  mutate(value=value*100)
+
+
+#ttest by country
+split.df=split(test,test$country)
+country.name=names(split.df)
+
+table=data.frame(country=as.character())
+
+for (i in 1:length(country.name)){
+df=split.df[[i]]
+cname=country.name[[i]]
+
+t=rstatix::t_test(df,value~status,p.adjust.method="bonferroni",paired=TRUE,ref.group = "no harvest price")
+g1=t$group1
+g2=t$group2
+s=t$statistic
+pval=t$p
+
+cprep=data.frame(cname,g1,g2,s,pval)
+table=rbind(table,cprep)
+
+}
+
+#overall ttest
+t_all=rstatix::t_test(test,value~status,paired=TRUE,p.adjust.method="bonferroni",ref.group = "no harvest price")
+c_all=data.frame(cname="Total",g1=t_all$group1,g2=t_all$group2,s=t_all$statistic,pval=t_all$p)
+table=rbind(table,c_all)
+
+table=table%>%
+  dplyr::mutate(stars=if_else(pval<.01,"***",if_else(pval<.05,"**",if_else(pval<.1,"*"," "))))%>%
+  dplyr::mutate(sp=paste(round(s,3),stars,sep=""))%>%
+  dplyr::select(cname,sp)%>%
+  dplyr::rename(country=cname,ttest=sp)%>%
+  add_row(country="Sierra Leone",ttest="NA")
+
+t1=left_join(t1,table,by="country")
+
+print=xtable(t1,type="latex")
+names(print)<-c("Country","Both prices exist","No harvest Price","No lean price","Mean return","T-test")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingness_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+
+
+#repeat for double season countries
+missing12=returns_con%>%
+   filter(market_type=="Retail"&country%in%double)%>%
+  mutate(status=if_else(is.finite(returns1) & is.finite(returns2),"both prices exist for both seasons",
+                         if_else(is.na(returns1) & is.finite(returns2),"incomplete primary season",
+                         if_else(is.finite(returns1) & is.na(returns2),"incomplete second season",
+                                         "other"))),
+         returns_yn=if_else(is.finite(returns1)&is.finite(returns2),1,0),country=as.factor(country))%>%
+  mutate(country=revalue(country,c("Democratic Republic of the Congo"="DR Congo","Central African Republic"="CAR")))%>%
+  dplyr::select(country,market,cropyear,status,returns1,returns2,returns_yn)
+
+#avg returns
+missing_m12=missing12%>%
+  group_by(country)%>%
+  dplyr::summarise(meanreturn1=mean(returns1,na.rm=TRUE),meanreturn2=mean(returns2,na.rm=TRUE))%>%
+  filter(is.finite(meanreturn1)|is.finite(meanreturn2))%>%
+  ungroup()
+
+missing_mm2=missing_m12%>%
+  add_row(country="Overall average",meanreturn1=mean(missing12$returns1,na.rm=TRUE),meanreturn2=mean(missing12$returns2,na.rm=TRUE))%>%
+  dplyr::mutate(across(contains("return"),~paste0(sprintf("%.1f",.*100),"%")))
+
+missing12$country=fct_infreq(missing12$country)  
+t2=missing12%>%
+  tabyl(country,status,show_na=FALSE)%>%
+  adorn_totals(c("row"))%>%
+  # adorn_totals(c("row","col"))%>%
+  adorn_percentages("row")%>%
+  adorn_pct_formatting(digits = 1) %>%
+  adorn_ns()%>%
+  as.tibble()%>%
+  full_join(missing_mm2,by="country")
+
+t2[is.na(t2)]=""
+
+
+
+print=xtable(t2,type="latex")
+names(print)<-c("Country","Both prices exist for both seasons","Incomplete primary season","Incomplete secondary season","Incomplete due to other permutation","Mean return primary season","Mean return secondary season")
+print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingness_double_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+
+##make pictures
+missing_m1$meanreturn=missing_m1$meanreturn*100
+
+ggplot()+
+  geom_bar(data=missing1,aes(x=country,stat="identity",fill=status))+
+  scale_fill_manual(values=c("gray","pink","purple"),breaks=c("both prices exist","no harvest price","no lean price"),labels=c("both prices exist","no harvest price","no lean price"),name="average returns (%) \n  * main season ")+
+  geom_point(data=missing_m1,aes(x=country,y=meanreturn*10),size=2,shape=8)+
+  scale_y_continuous(name="Count of crop years",sec.axis=sec_axis(trans~./10,name=""),expand=c(0,0),limits=c(0,1500))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),panel.grid.major.y = element_line(colour = "black"),panel.grid.minor.y = element_line(colour = "black"))
+
+ggsave("missingness_single.PNG",width=12,height=9)
+
+
+
+
+missing_m12$meanreturn1=missing_m12$meanreturn1*100
+missing_m12$meanreturn2=missing_m12$meanreturn2*100
+
+ggplot()+
+  geom_bar(data=missing12,aes(x=country,stat="identity",fill=status))+
+  scale_fill_manual(values=c("gray","magenta","mediumblue","turquoise"),breaks=c("both prices exist for both seasons","incomplete primary season","incomplete second season","other"),labels=c("both prices exist for both seasons","incomplete primary season","incomplete second season","other"),name="average returns (%) for \n *main season  \n .second season")+
+  geom_point(data=missing_m12,aes(x=country,y=meanreturn1*10),size=2,shape=8)+
+  geom_point(data=missing_m12,aes(x=country,y=meanreturn2*10),size=2,shape=16)+
+  scale_y_continuous(name="Count of crop years",sec.axis=sec_axis(trans~./10,name=""),expand=c(0,0),limits=c(0,1500))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),panel.grid.major.y = element_line(colour = "black"),panel.grid.minor.y = element_line(colour = "black"))
+
+ggsave("missingness_double.PNG",width=12,height=9)
+
+
+
+
+rm(list=ls(pattern="missing"),t1,t2,print,c_all,cname,g1,g2,i,n_mkt,pval,s,t,t_all,test,table,split.df)
+
+
+```
+
+
+
+10. Output figure: Dot plot of frequency of negative returns vs severity of trend (average returns)
+```{r output10,echo=FALSE}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+
+#separately for single and double seasons
+
+cb1=season_mkt%>%
+  filter(market_type=="Retail"&country%in%single)%>%
+    filter(is.finite(e.returns1)) 
+
+ggplot()+
+   geom_point(data=cb1,aes(x=pct_season1*100,y=e.returns1*100,size=n.yrs1))+ scale_y_continuous(name="Average returns to storage (%)",limits=c(-50,250),breaks=seq(-50,250,50),expand=c(0,0)) +  
+  scale_x_continuous(name="% of seasons with negative returns",limits=c(0,100),breaks=seq(0,100,20)) + 
+   theme(panel.grid.minor = element_blank(),panel.background = element_blank(),panel.grid.major = element_line(color="lightgray"),legend.position = c(1, 1),legend.justification = c(1, 1),
+         axis.line = element_line(color="black"))+guides(size = guide_legend(reverse = TRUE))+
+  geom_hline(yintercept=0,color="darkgray")+ scale_size(range = c(0.5,3),breaks=c(5,10,15,20),name="Number of \n market-years")
+
+ggsave("seasondotplot_single.png")
+
+cb12=season_mkt%>%
+  filter(market_type=="Retail"&country%in%double)%>%
+pivot_longer(cols=e.returns1:pct_season2,names_to=c(".value","season"),names_pattern="(.*?)(\\d)$",values_drop_na=TRUE)%>%
+  filter(is.finite(e.returns))
+
+
+ggplot()+
+   geom_point(data=cb12,aes(x=pct_season*100,y=e.returns*100,size=n.yrs,color=as.factor(season)),alpha=0.5)+ 
+  scale_y_continuous(name="Average returns to storage (%)",limits=c(-50,250),breaks=seq(-50,250,50),expand=c(0,0))+  
+  scale_x_continuous(name="% of seasons with negative returns",limits=c(0,100),breaks=seq(0,100,20))+
+  scale_color_manual(values=c("grey30","darkblue"),breaks=c("1","2"),labels=c("Primary Season","Secondary season"),name="")+
+   theme(panel.grid.minor = element_blank(),panel.background = element_blank(),panel.grid.major = element_line(color="lightgray"),legend.position = c(1, 1),legend.justification = c(1, 1),
+         axis.line = element_line(color="black"))+guides(size = guide_legend(reverse = TRUE))+
+  geom_hline(yintercept=0,color="darkgray")+ scale_size(range = c(0.5,3),breaks=c(5,10,15,20),name="Number of \n market-years")
+
+ggsave("seasondotplot_double.png")
+
+ 
+neg_all=cb1%>%filter(pct_season1==1) #25
+pos_all=cb1%>%filter(pct_season1==0) #210
+neg_country=unique(neg_all$country) #12 countries
+pos_country=unique(pos_all$country) #15 different countries
+neg_market=unique(neg_all$market) #25 markets
+pos_market=unique(pos_all$market) #210 different markets
+neg_all=returns_con%>%filter(market%in%neg_market&country%in%single)#78 total observations for those 25 markets
+pos_all=returns_con%>%filter(market%in%pos_market&country%in%single)#1503 total observations for those 210 markets
+
+neg_year=unique(neg_all$cropyear) #17 different years
+pos_year=unique(pos_all$cropyear) #23 different years
+
+
+
+rm(cb1,cb12,list=ls(pattern="neg_")) 
+rm(list=ls(pattern="pos_"))
+
+```
+
+
+11. Output figure: Dot plot of frequency of negative returns over time 
+```{r output11,echo=FALSE}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+
+#for single season countries
+
+time1=returns_con%>%
+  filter(market_type=="Retail"&country%in%single)%>%
+  filter(is.finite(returns1))%>%
+  mutate(prod_mt=prod_kg/1000)
+
+ggplot()+geom_jitter(data=time1,aes(x=factor(cropyear),y=returns1*100,color=yield_kgha),size=1.0,alpha=0.75)+ #geom_hline(yintercept=0,color="red",position="identity")+
+  scale_color_gradient2(low="gray80",high="gray10",na.value="gray",name="Yield (kg/ha)",limits=c(0,5000))+
+#scale_color_gradient2(low="chartreuse",high="darkgreen",na.value="gray",name="Yield (kg/ha)",limits=c(0,4000))+
+  scale_y_continuous(name="Returns to storage (%)",limits=c(-100,500),breaks=seq(-100,500,100),expand=c(0,0))+
+  scale_x_discrete(name="Year",breaks=c("2000","2004","2008","2012","2016","2020"),labels=c("2000","2004","2008","2012","2016","2020"))+
+  geom_hline(yintercept=0,color="red",position="identity")+
+  theme(panel.grid.major = element_line(color="lightgray"),panel.grid.minor = element_blank(), panel.background = element_blank(),axis.line = element_line(color="black"),legend.position = c(1, 1),legend.justification = c(1, 1))
+
+ggsave("cropyear_returns_dot_single_yield.PNG")
+
+ggplot()+geom_jitter(data=time1,aes(x=factor(cropyear),y=returns1*100,color=prod_mt),size=1.0,alpha=0.75)+ #geom_hline(yintercept=0,color="red",position="identity")+
+  scale_color_gradient2(low="gray80",high="gray10",na.value="gray",name="Production (MT)")+
+  scale_y_continuous(name="Returns to storage (%)",limits=c(-100,500),breaks=seq(-100,500,100),expand=c(0,0))+
+  scale_x_discrete(name="Year",breaks=c("2000","2004","2008","2012","2016","2020"),labels=c("2000","2004","2008","2012","2016","2020"))+
+  geom_hline(yintercept=0,color="red",position="identity")+
+  theme(panel.grid.major = element_line(color="lightgray"),panel.grid.minor = element_blank(), panel.background = element_blank(),axis.line = element_line(color="black"),legend.position = c(1, 1),legend.justification = c(1, 1))
+
+ggsave("cropyear_returns_dot_single_prod.PNG")
+
+
+time12=returns_con%>%
+  filter(market_type=="Retail"&country%in%double)%>%
+  dplyr::select(1:6,contains("returns"))
+  pivot_longer(cols=returns1:returns2,names_to=c(".value","season"),names_pattern="(.*?)(\\d)$",values_drop_na=TRUE)%>%
+  filter(is.finite(returns))
+
+ggplot()+geom_jitter(data=time12,aes(x=factor(cropyear),y=returns*100,color=season),size=1.0,alpha=0.75)+ 
+  scale_color_manual(values=c("grey30","darkblue"),breaks=c("1","2"),labels=c("Primary Season","Secondary season"),name="")+
+  scale_y_continuous(name="Returns to storage (%)",limits=c(-100,500),breaks=seq(-100,500,100),expand=c(0,0))+
+  scale_x_discrete(name="Year",breaks=c("2000","2004","2008","2012","2016","2020"),labels=c("2000","2004","2008","2012","2016","2020"))+
+  geom_hline(yintercept=0,color="red",position="identity")+
+  theme(panel.grid.major = element_line(color="lightgray"),panel.grid.minor = element_blank(), panel.background = element_blank(),axis.line = element_line(color="black"),legend.position = c(1, 1),legend.justification = c(1, 1))
+  
+ggsave("cropyear_returns_dot_double_yield.PNG")
+
+
+
+rm(time1,time12)
+
+
+
+
+```
+
+
+
+12. Plots for distribution of extreme harvest prices and returns (for seasonal returns) 
+```{r output12,echo=FALSE}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+
+#for single season countries
+exharvest1=returns_con%>%
+  filter(market_type=="Retail"&country%in%single&is.finite(returns1))%>%
+  group_by(country)%>%
+  dplyr::mutate(z_h1=scale(hmin1),h1_d=as.factor(paste0("d",ntile(hmin1,10))))%>%
+  ungroup()
+
+
+ggplot()+
+  geom_point(data=exharvest1,aes(x=z_h1,y=returns1*100,shape=factor(noarb1)),alpha=0.5,size=1)+
+    geom_smooth(data=exharvest1,aes(x=z_h1,y=returns1*100,color="blue"),method="lm",se=T)+
+  scale_y_continuous(name="Returns to storage for primary maize season (%)",limits=c(-100,500),breaks=seq(-100,500,100),expand=c(0,0)) + 
+  scale_x_continuous(name="Z-score of harvest price for primary maize season",limits=c(-3,6),breaks=seq(-3,6,1),expand=c(0,0))+
+  scale_shape_manual(values=c(3,16),breaks=c("0","1"),labels=c("Positive Returns","Negative Returns"),name="Returns to Storage")+
+  scale_color_manual(name="",labels=c("predicted"),values=c("blue"),breaks=c("blue"))+
+  #geom_hline(yintercept=0,color="red")+
+  theme(panel.grid.minor = element_blank(),axis.line = element_line(color="black"),panel.background = element_blank(),
+        legend.position = c(0.9, 0.9),legend.justification = c(1, 1),text=element_text(size=15))
+
+
+ggsave("harvestprices_returns_single.PNG",width=12,height=9)
+
+
+exharvest12=returns_con%>%
+  filter(market_type=="Retail"&country%in%double)%>%
+  dplyr::select(1:6,contains("returns"),contains("hmin"),contains("noarb"))%>%
+  pivot_longer(cols=returns1:noarb2,names_to=c(".value","season"),names_pattern="(.*?)(\\d)$",values_drop_na=TRUE)%>%
+  filter(is.finite(returns))%>%
+  group_by(country)%>%
+  dplyr::mutate(z_h=scale(hmin),h_d=as.factor(paste0("d",ntile(hmin,10))))%>%
+  ungroup()
+
+
+ggplot()+
+  geom_point(data=exharvest12,aes(x=z_h,y=returns*100,shape=factor(noarb),color=factor(season)),alpha=0.5,size=1)+
+     geom_smooth(data=exharvest12,aes(x=z_h,y=returns*100,color="blue"),method="lm",se=T)+
+    #scale_color_manual(name="",labels=c("predicted"),values=c("blue"),breaks=c("blue"))+
+  #new_scale_color()+
+  scale_y_continuous(name="Returns to storage for primary maize season (%)",limits=c(-100,500),breaks=seq(-100,500,100),expand=c(0,0)) + 
+  scale_x_continuous(name="Z-score of harvest price for primary maize season",limits=c(-3,6),breaks=seq(-3,6,1),expand=c(0,0))+
+  scale_shape_manual(values=c(3,16),breaks=c("0","1"),labels=c("Positive Returns","Negative Returns"),name="Returns to Storage")+
+  scale_color_manual(values=c("darkgreen","tomato3","blue"),breaks=c("1","2","blue"),labels=c("Primary Season","Secondary season","predicted"),name="")+
+    #geom_hline(yintercept=0,color="red")+
+  theme(panel.grid.minor = element_blank(),axis.line = element_line(color="black"),panel.background = element_blank(),
+        legend.position = c(0.9, 0.9),legend.justification = c(1, 1),text=element_text(size=15))
+
+ggsave("harvestprices_returns_double.PNG",width=12,height=9)
+
+
+
+
+rm(exharvest1,exharvest12)
+
+```
+
+
+
+13. OLS and probit regressions on harvest price (real)
+```{r OLSreg13 ,echo=FALSE}
+
+#for single season countries
+#limit to countries with at least 9 markets with at least 5 market years
+
+#minyears of data (y) per market and min number of markets (m)
+y=5
+m=9
+
+## Seasonal returns 
+limited1=returns_con%>%
+  filter(market_type=="Retail"&country%in%single&is.finite(returns1))%>%
+  group_by(country)%>%
+  dplyr::mutate(z_h1=as.numeric(scale(hmin1)),h1_d=as.factor(paste0("d",ntile(hmin1,10))))%>%
+  ungroup()%>%
+  group_by(country,region,commodity,market_type,market)%>%
+  filter(n()>=y)%>%
+  ungroup()%>%
+  group_by(country,commodity,market_type)%>%
+  filter(n_distinct(market)>=m)%>% 
+  ungroup()%>%
+  dplyr::select(1:6,hmin1,lmax1,returns1,noarb1,yield_kgha,z_h1)%>%
+    unite("country",country,commodity,sep="_")%>%
+  dplyr::mutate(across(c(country,market,cropyear),~as.factor(.)))
+                      
+
+
+split.df=split(limited1,limited1$country)
+country.name=names(split.df)
+
+#run with and without cropyear FE as robustness check
+table=data.frame(country=as.character())
+table_fe=data.frame(country=as.character())
+
+for (i in 1:length(country.name)){
+df=split.df[[i]]
+cname=country.name[[i]]
+n_mkt=length(unique(df$market))
+
+#without FE
+#OLS 
+o=lm(returns1*100~z_h1,data=df) 
+s=summary(o,robust=TRUE,diagnostics=TRUE)
+coef_o=s$coefficients[2,1]
+pval_o=s$coefficients[2,4]
+rsq_o=s$r.squared
+
+#probit
+p=feglm(noarb1~z_h1,data=df,family=binomial(link = "probit"))
+s=summary(marginaleffects(p),type="link")
+coef_p=s[1,"estimate"]
+pval_p=s[1,"p.value"]
+rsq_p=p$pseudo_r2
+
+cprep=data.frame(cname,n_mkt,coef_o,pval_o,rsq_o,coef_p,pval_p,rsq_p)
+table=rbind(table,cprep)
+
+#with FE
+#OLS 
+of=feols(returns1*100~z_h1|cropyear+market,vcov="twoway",data=df) #with crop yr + market FE
+coef_o=of$coeftable[1,1]
+pval_o=of$coeftable[1,4]
+rsq_o=as.numeric(r2(of,"war2"))
+
+#probit
+pf=feglm(noarb1~z_h1|cropyear+market,vcov="twoway",data=df,family=binomial(link = "probit"))
+s=summary(marginaleffects(pf),type="link")
+coef_p=s[1,"estimate"]
+pval_p=s[1,"p.value"]
+rsq_p=pf$pseudo_r2
+
+
+cprep_fe=data.frame(cname,n_mkt,coef_o,pval_o,rsq_o,coef_p,pval_p,rsq_p)
+table_fe=rbind(table_fe,cprep_fe)
+
+}
+
+###pooled regressions w/country dummies
+o_pool=lm(returns1*100~z_h1+country,data=limited1)
+s_pool=summary(o_pool,robust=TRUE,diagnostics=TRUE)
+rsq_o_pool=s_pool$r.squared
+p_pool=feglm(noarb1~z_h1+country,data=limited1,family=binomial(link = "probit"))
+rsq_p_pool=p_pool$pseudo_r2
+
+table=table%>%
+  add_row(cname="CC Average",n_mkt=sum(table$n_mkt),rsq_o=mean(table$rsq_o),rsq_p=mean(table$rsq_p))%>%
+   add_row(cname="Pooled",n_mkt=sum(table$n_mkt),rsq_o=rsq_o_pool,rsq_p=rsq_p_pool)%>%
+  mutate(stars_o=ifelse(pval_o < .01, "***", ifelse(pval_o < .05, "** ", ifelse(pval_o < .1, "* ", " "))),
+         stars_p=ifelse(pval_p < .01, "***", ifelse(pval_p < .05, "** ", ifelse(pval_p < .1, "* ", " "))))%>%
+  dplyr::mutate(cp_o=paste(sprintf("%.3f",coef_o),stars_o,sep=""),cp_p=paste(sprintf("%.3f",coef_p),stars_p,sep=""),
+         across(starts_with("rsq"),~sprintf("%.2f",.)))%>%
+  dplyr::select(cname,n_mkt,cp_o,rsq_o,cp_p,rsq_p)%>%
+  separate(cname,c("country","commodity"),sep="_")%>%
+  dplyr::mutate(across(everything(),~gsub("NANA","",.)))
+
+
+
+###pooled regressions w/cropyear+market FE and country dummies
+o_pool=feols(returns1*100~z_h1+country|cropyear+market,vcov="twoway",data=limited1)
+rsq_o_pool=as.numeric(r2(o_pool,"war2"))
+p_pool=feglm(noarb1~z_h1+country|cropyear+market,vcov="twoway",data=limited1,family=binomial(link = "probit"))
+rsq_p_pool=p_pool$pseudo_r2
+
+
+
+table_fe=table_fe%>%
+  add_row(cname="CC Average",n_mkt=sum(table_fe$n_mkt),rsq_o=mean(table_fe$rsq_o),rsq_p=mean(table_fe$rsq_p))%>%
+   add_row(cname="Pooled",n_mkt=sum(table_fe$n_mkt),rsq_o=rsq_o_pool,rsq_p=rsq_p_pool)%>%
+  mutate(stars_o=ifelse(pval_o < .01, "***", ifelse(pval_o < .05, "** ", ifelse(pval_o < .1, "* ", " "))),
+         stars_p=ifelse(pval_p < .01, "***", ifelse(pval_p < .05, "** ", ifelse(pval_p < .1, "* ", " "))))%>%
+  dplyr::mutate(cp_o=paste(sprintf("%.3f",coef_o),stars_o,sep=""),cp_p=paste(sprintf("%.3f",coef_p),stars_p,sep=""),
+         across(starts_with("rsq"),~sprintf("%.2f",.)))%>%
+  dplyr::select(cname,n_mkt,cp_o,rsq_o,cp_p,rsq_p)%>%
+  separate(cname,c("country","commodity"),sep="_")%>%
+  dplyr::mutate(across(everything(),~gsub("NANA","",.)))
+
+
+t=xtable(table,type="latex",auto=TRUE)
+names(t)<-c("Country","Commodity","Number of Markets","Harvest price z-score (OLS)","R squared","Harvest price z-score (probit)","Pseudo-R squared")
+print(t,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/OLSprobitreturns_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+t_fe=xtable(table_fe,type="latex",auto=TRUE)
+names(t_fe)<-c("Country","Commodity","Number of Markets","Harvest price z-score (OLS)","R squared","Harvest price z-score (probit)","Pseudo-R squared")
+print(t_fe,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/OLSprobitreturns_FE_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+rm(cprep,cprep_fe,df,table,table_fe,split.df,t,t_fe,i,cname,pm,o,p,s,list=ls(pattern="pool"),country.name,m,y,n_mkt)
+rm(list=ls(pattern="_o"))
+rm(list=ls(pattern="_p"))
+
+
+```
+
+
+14.Analysis and output: Risk premium/certainty equivalent over seasonal returns 
+```{r risk14, echo=FALSE}
+
+#KPSS test for stationarity
+kpss_mkt=limited1%>%
+  unite("c_mkt_com",c("country","market"))%>%
+  group_by(c_mkt_com)%>%
+  arrange(c_mkt_com,cropyear)%>%
+  dplyr::summarise(pval=ifelse(n()<=3,as.numeric(NA),kpss.test(ts(returns1))$p.value))
+
+nrow(subset(kpss_mkt,pval<0.05))
+#14 markets
+
+
+#create data frame with prices and returns for primary maize retail season, then calculate mean and variance for prices and returns and the minimum risk coefficient to avoid storage for that harvest price
+ex_price=limited1%>%
+  mutate(return=returns1,pl=lmax1,ph=hmin1)%>%
+  group_by(country,region,market)%>%
+  arrange(country,region,market)%>%
+  dplyr::mutate(across(c(ph,pl,return),list(e=mean,v=var),na.rm=TRUE,.names = "{.fn}.{.col}"))%>%
+  ungroup()%>%
+  dplyr::select(1:5,pl,e.pl,ph,v.pl,return,e.return,v.return)%>%
+  mutate(minr.nostore=2*e.return/v.return)
+
+
+
+ex_price_c=ex_price%>%
+  group_by(country)%>%
+dplyr::summarise(n_mkt=length(unique(market)))
+
+ex_price_c=ex_price_c%>%
+  add_row(country="Total_",n_mkt=sum(ex_price_c$n_mkt))
+
+
+#create sequence of risk aversion coefficients between 0 and 5 
+sim_rr=seq(0,5,by=0.1)
+
+#create certainty equivalent based on risk aversion coefficients and evaluate storage choice by comparing CE to harvest price and group by risk aversion tolerance with and without credit access (5% interest), also calculate the minimum risk coefficient to opt out of storage
+sim=expand_grid(ex_price,sim_rr)%>%
+  mutate(ce=e.pl-((sim_rr*v.pl)/(2*e.pl)),
+         cr=e.return-((sim_rr*v.return)/2))%>%
+  mutate(nostore.0=if_else(ph>ce,1,0),
+         nostore.r0=if_else(cr<=0,1,0),
+         nostore.r5=if_else(cr-.05<=0,1,0),
+         nostore.r10=if_else(cr-.1<=0,1,0))%>%
+  dplyr::mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))
+
+# #calculate market averages for storage avoidance by risk coefficient
+# sim_mkt=sim%>%
+#    group_by(country,region,market,sim_rr)%>%
+#   dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_mkt"))%>%
+#   ungroup()
+# 
+# #calculate market averages for minimum risk coefficient to avoid storage
+# minr_mkt=ex_price%>%
+#    group_by(country,region,market)%>%
+#   dplyr::summarise(across(contains("minr."),mean,na.rm=TRUE,.names = "{.col}_mkt"))%>%
+#   ungroup()
+
+  
+#calculate country averages for storage avoidance by risk coefficients and aggregate by risk tolerance group
+sim_country=sim%>%
+   group_by(country,sim_rr)%>%
+  dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
+  ungroup()%>%
+  mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))%>%
+  filter(!is.na(bin))%>%
+  group_by(country,bin)%>%
+   dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE))%>%
+  ungroup()%>%
+ pivot_wider(names_from =bin,values_from=c("nostore.0_c","nostore.r0_c","nostore.r5_c","nostore.r10_c"))
+
+#and for min risk coefficient
+minr_country=ex_price%>%
+   group_by(country)%>%
+  dplyr::summarise(across(contains("minr."),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
+  ungroup()%>%
+  left_join(ex_price_c,by=c("country"))
+
+
+#calculate total rows and add to dataframes
+sim_tot=sim_country%>%
+  dplyr::summarise(across(where(is.numeric),mean,na.rm=TRUE))%>%
+  dplyr::mutate(country="Total_")%>%
+  dplyr::select(country,everything())
+ 
+sim_country=rbind(sim_country,sim_tot)%>%
+  dplyr::mutate(across(starts_with("nostore"),~paste0(sprintf("%.1f",.*100),"%")))%>%
+  left_join(ex_price_c,by=c("country"))%>%
+  separate(country,c("country","commodity"),sep="_")
+
+
+minr_tot=minr_country%>%
+  dplyr::summarise(across(where(is.numeric),mean,na.rm=TRUE))%>%
+  mutate(country="Total_")%>%
+  dplyr::select(country,everything())
+
+minr_country=rbind(minr_country,minr_tot)%>%
+  dplyr::mutate(across(where(is.numeric),round,2))%>%separate(country,c("country","commodity"),sep="_")
+
+
+#separate the data frames by analysis
+
+#storage uptake percent by risk tolerance group (lean season prices no credit/interest rate)
+nostore_0=sim_country%>%
+  dplyr::select(country,commodity,n_mkt,starts_with("nostore.0"))
+
+#storage uptake percent by risk tolerance group (returns to storage no credit/interest rate)
+nostore_r0=sim_country%>%
+  dplyr::select(country,commodity,n_mkt,starts_with("nostore.r0"))
+
+#storage uptake percent by risk tolerance group (returns to storage 5% interest rate)
+nostore_r5=sim_country%>%
+  dplyr::select(country,commodity,n_mkt,starts_with("nostore.r5"))
+
+#storage uptake percent by risk tolerance group (returns to storage 5% interest rate)
+nostore_r10=sim_country%>%
+  dplyr::select(country,commodity,n_mkt,starts_with("nostore.r10"))
+
+minr_nostore=minr_country%>%
+  dplyr::select(country,commodity,n_mkt,starts_with("minr."))
+
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
+sim_table_grp=xtable(nostore_0,auto=TRUE,type="latex")
+print(sim_table_grp,file=paste0("./nostore_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+sim_table_grp=xtable(nostore_r0,auto=TRUE,type="latex")
+print(sim_table_grp,file=paste0("./nostore_riskgrp_r",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+sim_table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
+print(sim_table_grp,file=paste0("./nostore_i5_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+sim_table_grp=xtable(nostore_r10,auto=TRUE,type="latex")
+print(sim_table_grp,file=paste0("./nostore_i10_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+sim_table_grp=xtable(minr_nostore,auto=TRUE,type="latex")
+print(sim_table_grp,file=paste0("./nostore_minr_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+
+rm(ex_price,list=ls(pattern="sim"),ex_price_c,kpss_mkt)
+rm(list=ls(pattern="minr"))
+rm(list=ls(pattern="nostore_"))
+
+```
+
+
+
+14.nom. Make nominal dataset and repeat analysis
+```{r nominal,echo=FALSE}
+
+y=5
+m=9
+
+#for single season countries
+extreme1n=returnsn_con%>%
+  filter(market_type=="Retail"&country%in%single&is.finite(returns1))%>%
+  group_by(country)%>%
+  dplyr::mutate(z_h1=scale(hmin1),h1_d=as.factor(paste0("d",ntile(hmin1,10))))%>%
+  ungroup()
+
+
+## Seasonal returns 
+limited1n=extreme1n%>%
+  group_by(country,region,commodity,market_type,market)%>%
+  filter(n()>=y)%>%
+  ungroup()%>%
+  group_by(country,commodity,market_type)%>%
+  filter(n_distinct(market)>=m)%>% 
+  ungroup()%>%
+  dplyr::select(1:6,hmin1,lmax1,returns1,noarb1,yield_kgha,z_h1)%>%
+  dplyr::mutate(cropyear=as.factor(cropyear))%>%
+  unite("country",country,commodity,sep="_")
+
+#KPSS test for stationarity
+kpss_mktn=limited1n%>%
+  unite("c_mkt_com",c("country","market"))%>%
+  group_by(c_mkt_com)%>%
+  arrange(c_mkt_com,cropyear)%>%
+  dplyr::summarise(pval=ifelse(n()<=3,as.numeric(NA),kpss.test(ts(returns1))$p.value))
+
+nrow(subset(kpss_mktn,pval<0.05))
+#11 markets 
+
+#create data frame with prices and returns for primary maize retail season, then calculate mean and variance for prices and returns and the minimum risk coefficient to avoid storage for that harvest price
+ex_pricen=limited1n%>%
+  mutate(return=returns1,pl=lmax1,ph=hmin1)%>%
+  group_by(country,region,market)%>%
+  arrange(country,region,market)%>%
+  dplyr::mutate(across(c(ph,pl,return),list(e=mean,v=var),na.rm=TRUE,.names = "{.fn}.{.col}"))%>%
+  ungroup()%>%
+  dplyr::select(1:5,pl,e.pl,ph,v.pl,return,e.return,v.return)
+
+
+
+ex_price_c=ex_pricen%>%
+  group_by(country)%>%
+dplyr::summarise(n_mkt=length(unique(market)))
+
+ex_price_c=ex_price_c%>%
+  add_row(country="Total_",n_mkt=sum(ex_price_c$n_mkt))
+
+
+#create sequence of risk aversion coefficients between 0 and 5 
+sim_rr=seq(0,5,by=0.1)
+
+#create certainty equivalent based on risk aversion coefficients and evaluate storage choice by comparing CE to harvest price and group by risk aversion tolerance with and without credit access (5% interest), also calculate the minimum risk coefficient to opt out of storage
+simn=expand_grid(ex_pricen,sim_rr)%>%
+  mutate(ce=e.pl-((sim_rr*v.pl)/(2*e.pl)),
+         cr=e.return-((sim_rr*v.return)/2))%>%
+  mutate(nostore.0=if_else(ph>ce,1,0),
+         nostore.r0=if_else(cr<=0,1,0),nostore.r5=if_else(cr-.05<=0,1,0))%>%
+  dplyr::mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))
+
+
+#calculate country averages for storage avoidance by risk coefficients and aggregate by risk tolerance group
+sim_countryn=simn%>%
+   group_by(country,sim_rr)%>%
+  dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
+  ungroup()%>%
+  mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))%>%
+  filter(!is.na(bin))%>%
+  group_by(country,bin)%>%
+   dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE))%>%
+  ungroup()%>%
+ pivot_wider(names_from =bin,values_from=c("nostore.0_c","nostore.r0_c","nostore.r5_c"))
+
+
+#calculate total rows and add to dataframes
+sim_totn=sim_countryn%>%
+  dplyr::summarise(across(where(is.numeric),mean,na.rm=TRUE))%>%
+  dplyr::mutate(country="Total_")%>%
+  dplyr::select(country,everything())
+ 
+sim_countryn=rbind(sim_countryn,sim_totn)%>%
+  dplyr::mutate(across(starts_with("nostore"),~paste0(sprintf("%.1f",.*100),"%")))%>%
+  left_join(ex_price_c,by=c("country"))%>%
+  separate(country,c("country","commodity"),sep="_")
+
+#separate the data frames by analysis
+
+#storage uptake percent by risk tolerance group (lean season prices no credit/interest rate)
+nostore_0n=sim_countryn%>%
+  dplyr::select(country,commodity,n_mkt,starts_with("nostore.0"))
+
+#storage uptake percent by risk tolerance group (returns to storage no credit/interest rate)
+nostore_r0n=sim_countryn%>%
+  dplyr::select(country,commodity,n_mkt,starts_with("nostore.r0"))
+
+#storage uptake percent by risk tolerance group (returns to storage 5% interest rate)
+nostore_r5n=sim_countryn%>%
+  dplyr::select(country,commodity,n_mkt,starts_with("nostore.r5"))
+
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
+sim_table_grp=xtable(nostore_0n,auto=TRUE,type="latex")
+print(sim_table_grp,file=paste0("./nostore_riskgrp_nom_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+sim_table_grp=xtable(nostore_r0n,auto=TRUE,type="latex")
+print(sim_table_grp,file=paste0("./nostore_riskgrp_r_nom_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+sim_table_grp=xtable(nostore_r5n,auto=TRUE,type="latex")
+print(sim_table_grp,file=paste0("./nostore_i_riskgrp_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+rm(ex_pricen,nostore_0n,nostore_r0n,nostore_r5n,list=ls(pattern="sim"),ex_price_c,kpss_mktn)
+
+```
+
+
+
+
+15. Predicted lean season price and certainty equivalent/risk aversion (TBD)
+```{r predrisk15,results='asis', message = FALSE,include=FALSE}
+
+#filter season 
+presplit=limited1
+
+split.df=split(presplit,paste(presplit$country,presplit$region,presplit$market))
+
+cm.name=names(split.df)
+#results<-list()
+table3=data.frame(country_mkt=as.character(),coef=as.numeric())
+
+for (i in 1:length(cm.name)){
+df=split.df[[i]]
+cname=cm.name[[i]]
+m=lm(returns1~hmin1,data=df)#predict returns
+
+p_df=df%>%
+  dplyr::select(country,region,market,cropyear,hmin1,returns1)
+
+p_df$p_returns=predict(m,newdata=p_df)
+
+table3=rbind(table3,p_df)
+
+}
+
+
+######Returns by country (dotplot) vs prediction
+
+
+#returns to main season
+
+ex_price=table3%>%
+  arrange(country,region,market)%>%
+  group_by(country,region,market)%>%
+  dplyr::mutate_at("p_returns",funs(e.preturn=mean,v.preturn=var))%>%
+  ungroup()
+
+ex_price_c=ex_price%>%
+  group_by(country)%>%
+dplyr::summarise(n_mkt=length(unique(market)))
+
+ex_price_c=ex_price_c%>%
+  add_row(country="Total_",n_mkt=sum(ex_price_c$n_mkt))
+
+#create sequence of risk aversion coefficients 
+sim_rr=seq(0,5,by=0.1)
+
+#create certainty equivalent by risk aversion coefficient and evaluate storage choice
+sim=expand_grid(ex_price,sim_rr)%>%
+  mutate(cr=e.preturn-((sim_rr*v.preturn)/2))%>%
+  mutate(nostore.r5=if_else(cr-.05<=0,1,0),)%>%
+  dplyr::mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))
+
+
+
+# #calculate market averages for storage avoidance by risk coefficient
+# sim_mkt=sim%>%
+#    group_by(country,region,market,sim_rr)%>%
+#   dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_mkt"))%>%
+#   ungroup()
+
+  
+#calculate country averages over market averages for storage avoidance by risk coefficients and aggregate by risk tolerance group
+sim_country=sim%>%
+   group_by(country,sim_rr)%>%
+  dplyr::summarise(across(contains("nostore"),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
+  ungroup()%>%
+  mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))%>%
+  filter(!is.na(bin))%>%
+  group_by(country,bin)%>%
+   dplyr::summarise(across(contains("nostore"),mean,na.rm=TRUE))%>%
+  ungroup()%>%
+ pivot_wider(names_from =bin,values_from=c("nostore.r5_c"))
+
+
+#calculate total rows and add to dataframes
+sim_tot=sim_country%>%
+  dplyr::summarise(across(where(is.numeric),mean,na.rm=TRUE))%>%
+  mutate(country="Total_")%>%
+  dplyr::select(country,everything())
+ 
+sim_country=rbind(sim_country,sim_tot)%>%
+   dplyr::mutate(across(where(is.numeric),~paste0(sprintf("%.1f",.*100),"%")))%>%
+  left_join(ex_price_c,by=c("country"))%>%separate(country,c("country","commodity"),sep="_")
+
+
+#separate the data frames by analysis
+#storage uptake percent by risk tolerance group (no credit/interest rate)
+nostore_r5=sim_country%>%
+  dplyr::select(country,commodity,n_mkt,everything())
+
+
+table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
+print(table_grp,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/nostore_pred_i5",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+rm(p_df,table_grp,table3,i,cm.name,split.df,nostore_r5,df)
+rm(list=ls(pattern="sim"))
+
+
+```
+
+
+
+15.nom. Predicted lean season price and certainty equivalent/risk aversion using nominal prices (TBD)
+```{r predrisk15,results='asis', message = FALSE,include=FALSE}
+
+#filter season 
+presplit=limited1n
+
+split.df=split(presplit,paste(presplit$country,presplit$region,presplit$market))
+
+cm.name=names(split.df)
+#results<-list()
+table3=data.frame(country_mkt=as.character(),coef=as.numeric())
+
+for (i in 1:length(cm.name)){
+df=split.df[[i]]
+cname=cm.name[[i]]
+m=lm(returns1~hmin1,data=df)#predict returns
+
+p_df=df%>%
+  dplyr::select(country,region,market,cropyear,hmin1,returns1)
+
+p_df$p_returns=predict(m,newdata=p_df)
+
+table3=rbind(table3,p_df)
+
+}
+
+
+######Returns by country (dotplot) vs prediction
+
+
+#returns to main season
+
+ex_price=table3%>%
+  arrange(country,region,market)%>%
+  group_by(country,region,market)%>%
+  dplyr::mutate_at("p_returns",funs(e.preturn=mean,v.preturn=var))%>%
+  ungroup()
+
+ex_price_c=ex_price%>%
+  group_by(country)%>%
+dplyr::summarise(n_mkt=length(unique(market)))
+
+ex_price_c=ex_price_c%>%
+  add_row(country="Total_",n_mkt=sum(ex_price_c$n_mkt))
+
+#create sequence of risk aversion coefficients 
+sim_rr=seq(0,5,by=0.1)
+
+#create certainty equivalent by risk aversion coefficient and evaluate storage choice
+sim=expand_grid(ex_price,sim_rr)%>%
+  mutate(cr=e.preturn-((sim_rr*v.preturn)/2))%>%
+  mutate(nostore.r5=if_else(cr-.05<=0,1,0),)%>%
+  dplyr::mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))
+
+
+
+# #calculate market averages for storage avoidance by risk coefficient
+# sim_mkt=sim%>%
+#    group_by(country,region,market,sim_rr)%>%
+#   dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_mkt"))%>%
+#   ungroup()
+
+  
+#calculate country averages over market averages for storage avoidance by risk coefficients and aggregate by risk tolerance group
+sim_country=sim%>%
+   group_by(country,sim_rr)%>%
+  dplyr::summarise(across(contains("nostore"),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
+  ungroup()%>%
+  mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))%>%
+  filter(!is.na(bin))%>%
+  group_by(country,bin)%>%
+   dplyr::summarise(across(contains("nostore"),mean,na.rm=TRUE))%>%
+  ungroup()%>%
+ pivot_wider(names_from =bin,values_from=c("nostore.r5_c"))
+
+
+#calculate total rows and add to dataframes
+sim_tot=sim_country%>%
+  dplyr::summarise(across(where(is.numeric),mean,na.rm=TRUE))%>%
+  mutate(country="Total_")%>%
+  dplyr::select(country,everything())
+ 
+sim_country=rbind(sim_country,sim_tot)%>%
+   dplyr::mutate(across(where(is.numeric),~paste0(sprintf("%.1f",.*100),"%")))%>%
+  left_join(ex_price_c,by=c("country"))%>%separate(country,c("country","commodity"),sep="_")
+
+
+#separate the data frames by analysis
+#storage uptake percent by risk tolerance group (no credit/interest rate)
+nostore_r5=sim_country%>%
+  dplyr::select(country,commodity,n_mkt,everything())
+
+
+table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
+print(table_grp,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/nostore_pred_nom_i5",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+
+
+rm(p_df,table_grp,table3,i,cm.name,split.df,nostore_r0,df)
+rm(list=ls(pattern="sim"))
+
+
+```
+
+
+
+
+Appendix
+
+A1.Box and dotplots for intratemporal returns (thoughts on second season for double countries)
+```{r durationA1,echo=FALSE}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
+
+## Duration (FULL SET) data set for single season countries
+dur_1=returns_dur1%>%
+  filter(market_type=="Retail"&is.finite(returns1))
+
+
+######Returns to duration by country (boxplot)
+ggplot()+geom_boxplot(data=subset(dur_1,country%in%single),aes(x=factor(duration1),y=returns1*100),outlier.shape=1,position="dodge")+
+  scale_y_continuous(name="Returns to storage (%)", limits=c(-100,500),breaks=seq(-100,500,100))+
+  xlab("Number of Months Post-Harvest")+
+  geom_hline(yintercept=0,color="red",position="identity")+
+  facet_wrap(.~country,ncol=4)+
+  theme(plot.margin=margin(-0.5,-0.5,-0.5,-0.5,"pt"), panel.margin = unit(0.5,"cm"))
+
+ggsave("dur_returns_facet_single.PNG",width=12,height=9)
+
+
+######Returns to duration by country (boxplot)
+ggplot()+geom_boxplot(data=subset(dur_1,country%in%double),aes(x=factor(duration1),y=returns1*100),outlier.shape=1,position="dodge")+
+  scale_y_continuous(name="Returns to storage (%)", limits=c(-100,500),breaks=seq(-100,500,100))+
+  xlab("Number of Months Post-Harvest")+
+  geom_hline(yintercept=0,color="red",position="identity")+
+  facet_wrap(.~country,ncol=4)+
+  theme(plot.margin=margin(-0.5,-0.5,-0.5,-0.5,"pt"), panel.margin = unit(0.5,"cm"))
+
+ggsave("dur_returns_facet_double.PNG",width=12,height=9)
+
+
+rm(list=ls(pattern="dur_"))
+
+
+
+
+```
+
+
+
+
+A2. Monthly Average Graphs by Country and Market
+```{r monthlyavg2}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
+
+maize_monavg = maize%>%
+  filter(market_type=="Retail")%>%
+  group_by(country,region,commodity,market_type,market,month)%>%
+  dplyr::summarise(month_avg_real=mean(price_real_kg,na.rm=TRUE))
+
+c_seasons=unique(maize_monavg[,c('country')])%>%
+  inner_join(seasons,by="country")%>%
+  mutate(main_harvest_start=if_else(country=="Democratic Republic of the Congo",0,
+                 if_else(country=="Tanzania",5,main_harvest_start)),
+              main_harvest_end=if_else(country=="Democratic Republic of the Congo",2,
+                 if_else(country=="Tanzania",7,main_harvest_end)),
+               main_plant_start=if_else(country=="Democratic Republic of the Congo",6,
+                 if_else(country=="Tanzania",1,main_plant_start)),
+              main_plant_end=if_else(country=="Democratic Republic of the Congo",10,
+                 if_else(country=="Tanzania",3,main_plant_end)),
+         second_harvest_start=if_else(country%in%c("Benin","Cameroon","Cote d'Ivoire","Ghana","Nigeria","Togo","Uganda"),0,main_plant_end))%>%
+  group_by(country)%>%
+slice(1)%>%
+  ungroup()
+
+ggplot()+
+  geom_rect(data=subset(c_seasons,country%in%single),mapping=aes(xmin=main_plant_start,xmax=main_plant_end,ymin=-Inf,ymax=Inf,fill="gray90"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+       geom_rect(data=subset(c_seasons,country%in%single),mapping=aes(xmin=main_harvest_start,xmax=main_harvest_end,ymin=-Inf,ymax=Inf,fill="grey50"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+  scale_fill_manual(values=c("gray90","grey50"))+
+  geom_text(data=subset(c_seasons,country%in%single),aes(x=main_plant_start+0.7,y=0,label="Planting1"),size=3,angle=90,vjust=0,hjust=0)+
+    geom_text(data=subset(c_seasons,country%in%single),aes(x=main_harvest_start+0.7,y=0,label="Harvest1"),size=3,angle=90,vjust=0,hjust=0)+
+  new_scale_fill()+
+    geom_line(data=subset(maize_monavg,country%in%single), aes(x=month,y=month_avg_real,group=market,color=market),show.legend=FALSE)+
+            labs(x="Month",y="Mean Local Value of Maize per Kilo (Real)") +
+    scale_x_discrete(name="Month",limits=c("1","2","3","4","5","6","7","8","9","10","11","12"))+
+  facet_wrap(.~country,scales="free_y",ncol=4)+
+    theme(panel.grid.minor = element_blank(),panel.background = element_blank(),
+         axis.line = element_line(color="black"), strip.background = element_rect(color="black",fill="white"))
+
+ggsave("monavg_facet_single.PNG",width=12,height=9)
+
+ggplot()+
+  geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=main_plant_start,xmax=main_plant_end,ymin=-Inf,ymax=Inf,fill="gray90"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+       geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=main_harvest_start,xmax=main_harvest_end,ymin=-Inf,ymax=Inf,fill="grey50"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+  scale_fill_manual(values=c("gray90","grey50"))+
+  geom_text(data=subset(c_seasons,country%in%double),aes(x=main_plant_start+0.7,y=0,label="Planting1"),size=3,angle=90,vjust=0,hjust=0)+
+    geom_text(data=subset(c_seasons,country%in%double),aes(x=main_harvest_start+0.7,y=0,label="Harvest1"),size=3,angle=90,vjust=0,hjust=0)+
+  new_scale_fill()+
+    geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=second_plant_start,xmax=second_plant_end,ymin=-Inf,ymax=Inf,fill="gray90"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+       geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=second_harvest_start,xmax=second_harvest_end,ymin=-Inf,ymax=Inf,fill="grey50"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+  scale_fill_manual(values=c("gray60","grey30"))+
+  geom_text(data=subset(c_seasons,country%in%double),aes(x=second_plant_start+0.7,y=0.1,label="Planting2"),size=3,angle=90,vjust=0,hjust=0)+
+    geom_text(data=subset(c_seasons,country%in%double),aes(x=second_harvest_start+0.7,y=0.1,label="Harvest2"),size=3,angle=90,vjust=0,hjust=0)+
+  new_scale_fill()+
+    geom_line(data=subset(maize_monavg,country%in%double), aes(x=month,y=month_avg_real,group=market,color=market),show.legend=FALSE)+
+            labs(x="Month",y="Mean Local Value of Maize per Kilo (Real)") +
+    scale_x_discrete(name="Month",limits=c("1","2","3","4","5","6","7","8","9","10","11","12"))+
+  facet_wrap(.~country,scales="free_y",ncol=4)+
+    theme(panel.grid.minor = element_blank(),panel.background = element_blank(),
+         axis.line = element_line(color="black"), strip.background = element_rect(color="black",fill="white"))
+
+#need to note weird shit with DRC seasons because of multi-region
+ggsave("monavg_facet_double.PNG",width=12,height=9)
+
+
+rm(list=ls(pattern="monavg"))
+
+```
+
+
+
+A3. Minmax Graphs by Country
+```{r minmax3}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
+
+maize_minmax=maize%>%
+  filter(market_type=="Retail")%>%
+   dplyr::group_by(country,region,market,commodity,market_type,year)%>%
+  dplyr::summarise(min_price=min(price_real_kg),max_price=max(price_real_kg),
+                   min_month=month[which.min(price_real_kg)],max_month=month[which.max(price_real_kg)])%>%
+  pivot_longer(cols=min_price:max_month,names_to=c("variable",".value"),names_sep="_",values_drop_na=TRUE)
+
+
+ggplot()+
+  geom_rect(data=subset(c_seasons,country%in%single),mapping=aes(xmin=main_plant_start,xmax=main_plant_end,ymin=0,ymax=Inf,fill="gray90"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+       geom_rect(data=subset(c_seasons,country%in%single),mapping=aes(xmin=main_harvest_start,xmax=main_harvest_end,ymin=0,ymax=Inf,fill="grey50"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+  scale_fill_manual(values=c("gray90","grey50"))+
+  geom_text(data=subset(c_seasons,country%in%single),aes(x=main_plant_start+0.7,y=0,label="Planting1"),size=3,angle=90,vjust=0,hjust=0)+
+    geom_text(data=subset(c_seasons,country%in%single),aes(x=main_harvest_start+0.7,y=0,label="Harvest1"),size=3,angle=90,vjust=0,hjust=0)+
+  new_scale_fill()+
+  geom_histogram(data=subset(maize_minmax,country%in%single),aes(x=month,fill=variable,color=variable),binwidth=0.5,position="dodge") +
+ scale_color_manual(name="Month Type",values=c("turquoise","navyblue"),breaks=c("min","max"),labels=c("Min price","Max price"))+
+scale_fill_manual(name="Month Type",values=c("turquoise","navyblue"),breaks=c("min","max"),labels=c("Min price","Max price"))+
+  scale_x_discrete(name="Month",limits=c("1","2","3","4","5","6","7","8","9","10","11","12"),expand=c(0,0))+ 
+   scale_y_continuous(name="Number of Months",limits=c(0,NA))+
+ facet_wrap(.~country,scales="free_y",ncol=4)+
+    theme(panel.grid.minor = element_blank(),panel.background = element_blank(),
+         axis.line = element_line(color="black"), strip.background = element_rect(color="black",fill="gray"))
+
+
+ggsave("minmax_facet_single.PNG",width=12,height=9)
+
+ggplot()+
+  geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=main_plant_start,xmax=main_plant_end,ymin=0,ymax=Inf,fill="gray90"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+       geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=main_harvest_start,xmax=main_harvest_end,ymin=0,ymax=Inf,fill="grey50"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+  scale_fill_manual(values=c("gray90","grey50"))+
+  geom_text(data=subset(c_seasons,country%in%double),aes(x=main_plant_start+0.7,y=0,label="Planting1"),size=3,angle=90,vjust=0,hjust=0)+
+    geom_text(data=subset(c_seasons,country%in%double),aes(x=main_harvest_start+0.7,y=0,label="Harvest1"),size=3,angle=90,vjust=0,hjust=0)+
+  new_scale_fill()+
+    geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=second_plant_start,xmax=second_plant_end,ymin=0,ymax=Inf,fill="gray90"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+       geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=second_harvest_start,xmax=second_harvest_end,ymin=0,ymax=Inf,fill="grey50"),
+                 color="black",alpha=0.5,show.legend=FALSE)+
+  scale_fill_manual(values=c("gray60","grey30"))+
+  geom_text(data=subset(c_seasons,country%in%double),aes(x=second_plant_start+0.7,y=0.1,label="Planting2"),size=3,angle=90,vjust=0,hjust=0)+
+    geom_text(data=subset(c_seasons,country%in%double),aes(x=second_harvest_start+0.7,y=0.1,label="Harvest2"),size=3,angle=90,vjust=0,hjust=0)+
+  new_scale_fill()+
+  geom_histogram(data=subset(maize_minmax,country%in%double),aes(x=month,fill=variable,color=variable),binwidth=0.5,position="dodge") +
+ scale_color_manual(name="Month Type",values=c("turquoise","navyblue"),breaks=c("min","max"),labels=c("Min price","Max price"))+
+scale_fill_manual(name="Month Type",values=c("turquoise","navyblue"),breaks=c("min","max"),labels=c("Min price","Max price"))+
+  scale_x_discrete(name="Month",limits=c("1","2","3","4","5","6","7","8","9","10","11","12"),expand=c(0,0))+ 
+   scale_y_continuous(name="Number of Months",limits=c(0,NA))+
+ facet_wrap(.~country,scales="free_y",ncol=4)+
+      theme(panel.grid.minor = element_blank(),panel.background = element_blank(),
+         axis.line = element_line(color="black"), strip.background = element_rect(color="black",fill="gray"))
+
+ggsave("minmax_facet_double.PNG",width=12,height=9)
+
+rm(list=ls(pattern="minmax"),c_seasons)
+
+```
+
+
+A4. Certainty equivalent over all length of time (TBD)
+```{r duration4,echo=FALSE,results='asis', message = FALSE}
+
+setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
+#create data frame with prices and returns for primary maize retail season, then calculate mean and variance for prices and returns and the minimum risk coefficient to avoid storage for that harvest price
+ex_priced=duration1%>%
+  mutate(return=returns1,pl=price_real_kg,ph=hend1)%>%
+  group_by(country,region,market,duration1)%>%
+  arrange(country,region,market,duration1)%>%
+  dplyr::mutate(across(c(ph,pl,return),list(e=mean,v=var),na.rm=TRUE,.names = "{.fn}.{.col}"))%>%
+  ungroup()%>%
+  dplyr::select(1:6,duration1,pl,e.pl,ph,v.pl,return,e.return,v.return)
+
+
+ex_price_cd=ex_priced%>%
+  group_by(country,duration1)%>%
+dplyr::summarise(n_mkt=length(unique(market)))
+
+
+#create sequence of risk aversion coefficients between 0 and 5 
+sim_rr=seq(0,5,by=0.1)
+
+#create certainty equivalent based on risk aversion coefficients and evaluate storage choice by comparing CE to harvest price and group by risk aversion tolerance with and without credit access (5% interest), also calculate the minimum risk coefficient to opt out of storage
+sim=expand_grid(ex_priced,sim_rr)%>%
+  mutate(cr=e.return-((sim_rr*v.return)/2))%>%
+  mutate(nostore.r0=if_else(cr<=0,1,0))%>%
+  dplyr::mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))
+
+
+#calculate market averages for storage avoidance by risk coefficient
+sim_mkt=sim%>%
+   group_by(country,region,market,duration1,sim_rr)%>%
+  dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_mkt"))%>%
+  ungroup()
+
+  
+#calculate country averages over market averages for storage avoidance by risk coefficients and aggregate by risk tolerance group
+sim_country=sim_mkt%>%
+   group_by(country,duration1,sim_rr)%>%
+  dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
+  ungroup()%>%
+  mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))%>%
+  filter(!is.na(bin))%>%
+  group_by(country,duration1,bin)%>%
+   dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE))%>%
+  ungroup()
+
+
+
+
+duration_risk=ggplot()+
+  geom_path(data=sim_country,aes(x=factor(duration1),y=nostore.r0_mkt_c*100,color=bin,group=bin),size=1)+
+  scale_colour_manual(values = c("green", "gray", "red"),name="Relative Risk Aversion")+
+  scale_x_discrete(name="Number of Months Post-Harvest")+
+  scale_y_continuous(name="Share of markets farmers should forgo storage",limits=c(0,100))+
+  facet_wrap(.~country,ncol=4,scale="free_x")+
+  #labs(title="Share of markets farmers should forgo storage over all months post-harvest")+
+  theme(panel.grid.minor = element_blank(),panel.background = element_blank(),panel.grid.major = element_blank(),
+         axis.line = element_line(color="black"),
+         legend.position = c(0.9, 0),legend.justification = c(1, 0),
+        plot.title = element_text(hjust = 0.5,face="bold"),
+        plot.margin=margin(-0.5,-0.5,-0.5,-0.5,"pt"), panel.margin = unit(0.5,"cm"),
+        text= element_text(family="serif"))
+
+
+ggsave("duration_risk.PNG",width=12,height=9)
+
+
+```
+
+
+
+
