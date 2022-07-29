@@ -8,19 +8,19 @@ Please contact Lila Cardell at lilac2 at illinois dot edu for questions on using
 The R code in this replication package imports and analysis publically available data on market prices, agricultural seasons, national crop production, geographic locations, and CPI. 
 Two files run the code to import, aggregate, and analyze the data as well as generate the tables and graphs.
 
-##Data Availability and Provenance Statements
+## Data Availability and Provenance Statements
 There are multiple sources of publically available data  used in this paper:
 
 1. Monthly maize prices are downloaded directly within the file "dataimport_042722" from the [HDX Global Data Exchange](https://data.humdata.org/dataset/global-wfp-food-prices) using an R package (rhdx). The data are collected and aggregated by the World Food Programme (WFP). The data are in the public domain.
 Any issues should be directly to the package developer. In section 2, there is a line to download the set of maize prices "maizeprices_042722" from the "Clean Data" folder directly to avoid using this package. Note that if the database is updated retroactively, the dataset accessed as of April 2022 may differ from the updated database.
 
-2. CPI data was dowloaded from the [International Financial Statistics Database](https://data.imf.org/?sk=4c514d48-b6ba-49ed-8ab9-52b0c1a0179b), and [FAOSTAT](https://www.fao.org/faostat/en/*data/CP) as of April 2022. The data are in the public domain and are available in the "Raw Data" folder.
+2. CPI data was dowloaded from the [International Financial Statistics Database](https://data.imf.org/?sk=4c514d48-b6ba-49ed-8ab9-52b0c1a0179b), and [FAOSTAT](https://www.fao.org/faostat/en/#data/CP) as of April 2022. The data are in the public domain and are available in the "Raw Data" folder.
 
 3. Agricultural Season data was collected by FAO GIEWS and downloaded from the [University of Wisconsin](https://sage.nelson.wisc.edu/data-and-models/datasets/crop-calendar-dataset). The data are in the public domain and are available in the "Raw Data" folder. 
 
 4. Market location data was found using the R geocode command from [TidyGeocoder](https://jessecambon.github.io/tidygeocoder). For any missing coordinates, there are two additional excel files with coordinate data from GoogleEarth.
 
-5. National yield and production data were downloaded from [FAOSTAT](https://www.fao.org/faostat/en/*data/QCL) and [USDA Foreign Agricultural Service](https://apps.fas.usda.gov/psdonline/app/index.html*/app/downloads) as of April 2022. The data are in the public domain and are available in the "Raw Data" folder.
+5. National yield and production data were downloaded from [FAOSTAT](https://www.fao.org/faostat/en/*data/QCL) and [USDA Foreign Agricultural Service](https://apps.fas.usda.gov/psdonline/app/index.html#/app/downloads) as of April 2022. The data are in the public domain and are available in the "Raw Data" folder.
 
 
 ## Code
