@@ -45,8 +45,7 @@ table_dir<-gsub("/Code$","/Output/Tables",code_dir)
 
 1. Compare real and nominal price availability and correct any errors
 ```{r prelim}
-#rm(maize_geo)
-#maize_geo<- read_dta("~/Box/GIEWS_project/GIEWS/Data/maizegeoprices_042722.dta")
+
 
 sum(is.na(maize_geo$price_real_kg))
 #3096 observations missing from Somalia and a few from South Sudan
@@ -74,7 +73,7 @@ maize_real<-maize_nom%>%
    filter(!is.na(price_real_kg))
   
 
-rm(maize_geo)
+rm(maize_geo,maizeprices_042722)
 
 ```
 
@@ -234,7 +233,7 @@ double=unlist(seasons%>%
                 filter(is.finite(main)&is.finite(second))%>%dplyr::select(country))
 
 
-rm(seasons)
+
 
 ```
 
@@ -1308,8 +1307,8 @@ rm(list=ls(pattern="pos_"))
 ```
 
 
-11. Output figure: Dot plot of frequency of negative returns over time 
-```{r output11,echo=FALSE}
+12. Output figure: Dot plot of frequency of negative returns over time 
+```{r output12,echo=FALSE}
 
 
 
@@ -1342,7 +1341,7 @@ ggsave(paste0(figure_dir,"/cropyear_returns_dot_single_prod.PNG"))
 
 time12=returns_con%>%
   filter(market_type=="Retail"&country%in%double)%>%
-  dplyr::select(1:6,contains("returns"))
+  dplyr::select(1:6,contains("returns"))%>%
   pivot_longer(cols=returns1:returns2,names_to=c(".value","season"),names_pattern="(.*?)(\\d)$",values_drop_na=TRUE)%>%
   filter(is.finite(returns))
 
@@ -1366,8 +1365,8 @@ rm(time1,time12)
 
 
 
-12. Plots for distribution of extreme harvest prices and returns (for seasonal returns) 
-```{r output12,echo=FALSE}
+13. Plots for distribution of extreme harvest prices and returns (for seasonal returns) 
+```{r output13,echo=FALSE}
 
 
 
@@ -1428,8 +1427,8 @@ rm(exharvest1,exharvest12)
 
 
 
-13. OLS and probit regressions on harvest price (real)
-```{r OLSreg13 ,echo=FALSE}
+14. OLS and probit regressions on harvest price (real)
+```{r regr ,echo=FALSE}
 
 #for single season countries
 #limit to countries with at least 9 markets with at least 5 market years
@@ -1548,11 +1547,11 @@ table_fe=table_fe%>%
 
 t=xtable(table,type="latex",auto=TRUE)
 names(t)<-c("Country","Commodity","Number of Markets","Harvest price z-score (OLS)","R squared","Harvest price z-score (probit)","Pseudo-R squared")
-print(t,file=paste0(table_dir,"/OLSprobitreturns_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(t,file=paste0(table_dir,"/OLSprobitreturns_single.tex"),include.rownames=FALSE)
 
 t_fe=xtable(table_fe,type="latex",auto=TRUE)
 names(t_fe)<-c("Country","Commodity","Number of Markets","Harvest price z-score (OLS)","R squared","Harvest price z-score (probit)","Pseudo-R squared")
-print(t_fe,file=paste0(table_dir,"/OLSprobitreturns_FE_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(t_fe,file=paste0(table_dir,"/OLSprobitreturns_FE_single.tex"),include.rownames=FALSE)
 
 
 rm(cprep,cprep_fe,df,table,table_fe,split.df,t,t_fe,i,cname,pm,o,p,s,list=ls(pattern="pool"),country.name,m,y,n_mkt)
@@ -1563,8 +1562,8 @@ rm(list=ls(pattern="_p"))
 ```
 
 
-14.Analysis and output: Risk premium/certainty equivalent over seasonal returns 
-```{r risk14, echo=FALSE}
+15.Analysis and output: Risk premium/certainty equivalent over seasonal returns 
+```{r riskr, echo=FALSE}
 
 #KPSS test for stationarity
 kpss_mkt=limited1%>%
@@ -1688,19 +1687,19 @@ minr_nostore=minr_country%>%
 
 
 sim_table_grp=xtable(nostore_0,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp.tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r0,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_r",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_r.tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0(table_dir,"/nostore_i5_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_i5_riskgrp.tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r10,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0(table_dir,"/nostore_i10_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_i10_riskgrp.tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(minr_nostore,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0(table_dir,"/nostore_minr_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_minr_riskgrp.tex"),include.rownames=FALSE)
 
 
 
@@ -1712,8 +1711,8 @@ rm(list=ls(pattern="nostore_"))
 
 
 
-14.nom. Make nominal dataset and repeat analysis
-```{r nominal,echo=FALSE}
+16. Make nominal dataset and repeat analysis
+```{r risknom,echo=FALSE}
 
 y=5
 m=9
@@ -1818,16 +1817,15 @@ nostore_r5n=sim_countryn%>%
   dplyr::select(country,commodity,n_mkt,starts_with("nostore.r5"))
 
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
 
 sim_table_grp=xtable(nostore_0n,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_nom_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_nom.tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r0n,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_r_nom_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_r_nom.tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r5n,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0(table_dir,"/nostore_i_riskgrp_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_i_riskgrp_nom.tex"),include.rownames=FALSE)
 
 
 rm(ex_pricen,nostore_0n,nostore_r0n,nostore_r5n,list=ls(pattern="sim"),ex_price_c,kpss_mktn)
@@ -1837,8 +1835,8 @@ rm(ex_pricen,nostore_0n,nostore_r0n,nostore_r5n,list=ls(pattern="sim"),ex_price_
 
 
 
-15. Predicted lean season price and certainty equivalent/risk aversion (TBD)
-```{r predrisk15,results='asis', message = FALSE,include=FALSE}
+17. Predicted lean season price and certainty equivalent/risk aversion 
+```{r predrisk,echo=FALSE}
 
 #filter season 
 presplit=limited1
@@ -1931,7 +1929,7 @@ nostore_r5=sim_country%>%
 
 
 table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
-print(table_grp,file=paste0(table_dir,"/nostore_pred_i5",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(table_grp,file=paste0(table_dir,"/nostore_pred_i5.tex"),include.rownames=FALSE)
 
 
 rm(p_df,table_grp,table3,i,cm.name,split.df,nostore_r5,df)
@@ -1942,8 +1940,8 @@ rm(list=ls(pattern="sim"))
 
 
 
-15.nom. Predicted lean season price and certainty equivalent/risk aversion using nominal prices (TBD)
-```{r predrisk15,results='asis', message = FALSE,include=FALSE}
+17. Predicted lean season price and certainty equivalent/risk aversion using nominal prices 
+```{r predrisknom,echo=FALSE}
 
 #filter season 
 presplit=limited1n
@@ -2036,7 +2034,7 @@ nostore_r5=sim_country%>%
 
 
 table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
-print(table_grp,file=paste0(table_dir,"/nostore_pred_nom_i5",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(table_grp,file=paste0(table_dir,"/nostore_pred_nom_i5.tex"),include.rownames=FALSE)
 
 
 rm(p_df,table_grp,table3,i,cm.name,split.df,nostore_r0,df)
@@ -2096,7 +2094,7 @@ A2. Monthly Average Graphs by Country and Market
 
 
 
-maize_monavg = maize%>%
+maize_monavg = maize_real%>%
   filter(market_type=="Retail")%>%
   group_by(country,region,commodity,market_type,market,month)%>%
   dplyr::summarise(month_avg_real=mean(price_real_kg,na.rm=TRUE))
@@ -2174,7 +2172,7 @@ A3. Minmax Graphs by Country
 
 
 
-maize_minmax=maize%>%
+maize_minmax=maize_real%>%
   filter(market_type=="Retail")%>%
    dplyr::group_by(country,region,market,commodity,market_type,year)%>%
   dplyr::summarise(min_price=min(price_real_kg),max_price=max(price_real_kg),
@@ -2229,84 +2227,11 @@ scale_fill_manual(name="Month Type",values=c("turquoise","navyblue"),breaks=c("m
       theme(panel.grid.minor = element_blank(),panel.background = element_blank(),
          axis.line = element_line(color="black"), strip.background = element_rect(color="black",fill="gray"))
 
-ggsave(paste0(figure_dir,/"minmax_facet_double.PNG"),width=12,height=9)
+ggsave(paste0(figure_dir,"/minmax_facet_double.PNG"),width=12,height=9)
 
 rm(list=ls(pattern="minmax"),c_seasons)
 
 ```
-
-
-A4. Certainty equivalent over all length of time (TBD)
-```{r duration4,echo=FALSE,results='asis', message = FALSE}
-
-
-
-#create data frame with prices and returns for primary maize retail season, then calculate mean and variance for prices and returns and the minimum risk coefficient to avoid storage for that harvest price
-ex_priced=duration1%>%
-  mutate(return=returns1,pl=price_real_kg,ph=hend1)%>%
-  group_by(country,region,market,duration1)%>%
-  arrange(country,region,market,duration1)%>%
-  dplyr::mutate(across(c(ph,pl,return),list(e=mean,v=var),na.rm=TRUE,.names = "{.fn}.{.col}"))%>%
-  ungroup()%>%
-  dplyr::select(1:6,duration1,pl,e.pl,ph,v.pl,return,e.return,v.return)
-
-
-ex_price_cd=ex_priced%>%
-  group_by(country,duration1)%>%
-dplyr::summarise(n_mkt=length(unique(market)))
-
-
-#create sequence of risk aversion coefficients between 0 and 5 
-sim_rr=seq(0,5,by=0.1)
-
-#create certainty equivalent based on risk aversion coefficients and evaluate storage choice by comparing CE to harvest price and group by risk aversion tolerance with and without credit access (5% interest), also calculate the minimum risk coefficient to opt out of storage
-sim=expand_grid(ex_priced,sim_rr)%>%
-  mutate(cr=e.return-((sim_rr*v.return)/2))%>%
-  mutate(nostore.r0=if_else(cr<=0,1,0))%>%
-  dplyr::mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))
-
-
-#calculate market averages for storage avoidance by risk coefficient
-sim_mkt=sim%>%
-   group_by(country,region,market,duration1,sim_rr)%>%
-  dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_mkt"))%>%
-  ungroup()
-
-  
-#calculate country averages over market averages for storage avoidance by risk coefficients and aggregate by risk tolerance group
-sim_country=sim_mkt%>%
-   group_by(country,duration1,sim_rr)%>%
-  dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE,.names = "{.col}_c"))%>%
-  ungroup()%>%
-  mutate(bin=cut(sim_rr,breaks=c(0,1,3,5),right=FALSE,labels=c("Risk Neutral R=[0,1)", "Risk Averse R=[1,3)","High Risk Aversion R=[3,5)")))%>%
-  filter(!is.na(bin))%>%
-  group_by(country,duration1,bin)%>%
-   dplyr::summarise(across(contains("nostore."),mean,na.rm=TRUE))%>%
-  ungroup()
-
-
-
-
-duration_risk=ggplot()+
-  geom_path(data=sim_country,aes(x=factor(duration1),y=nostore.r0_mkt_c*100,color=bin,group=bin),size=1)+
-  scale_colour_manual(values = c("green", "gray", "red"),name="Relative Risk Aversion")+
-  scale_x_discrete(name="Number of Months Post-Harvest")+
-  scale_y_continuous(name="Share of markets farmers should forgo storage",limits=c(0,100))+
-  facet_wrap(.~country,ncol=4,scale="free_x")+
-  #labs(title="Share of markets farmers should forgo storage over all months post-harvest")+
-  theme(panel.grid.minor = element_blank(),panel.background = element_blank(),panel.grid.major = element_blank(),
-         axis.line = element_line(color="black"),
-         legend.position = c(0.9, 0),legend.justification = c(1, 0),
-        plot.title = element_text(hjust = 0.5,face="bold"),
-        plot.margin=margin(-0.5,-0.5,-0.5,-0.5,"pt"), panel.margin = unit(0.5,"cm"),
-        text= element_text(family="serif"))
-
-
-ggsave(paste0(figure_dir,"/duration_risk.PNG"),width=12,height=9)
-
-
-```
-
 
 
 
