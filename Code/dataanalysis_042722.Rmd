@@ -6,8 +6,8 @@ output: html_document
 ---
 
 
-Load packages
-```{r setup, include=FALSE}
+0. Load packages and Rdata 
+```{r setup, include=FALSE, warning=FALSE, message=FALSE,results='hide'}
 
 #library(installr)
 #updateR()
@@ -17,47 +17,44 @@ if (!require("pacman")) install.packages("pacman")
 pacman::p_load(data.table,tidyr,plyr,dplyr,readxl,haven,janitor,stringr,lubridate,foreign,stargazer,survey,xtable,fuzzyjoin,
                knitr,tables,car,outliers,styler,magrittr,sjmisc,ggplot2,ggbur,ggnewscale,scales,quantmod,distr6,forcats,tibble,
                ggrepel,gdata,stringdist,moments,mfx,marginaleffects,rsq,rnaturalearth,rnaturalearthdata,styler,sjmisc,
-               magrittr,labelled,stringdist,fixest,tidygeocoder,BBmisc,blorr,DescTools,tseries,kableExtra)
+               magrittr,labelled,stringdist,fixest,tidygeocoder,BBmisc,blorr,DescTools,tseries,kableExtra,rstatix)
 pacman::p_update()
 
 options(scipen=999,warn=-1)
-set.seed(101484)
+set.seed(101485)
 
 knitr::opts_chunk$set(
 	message = FALSE,
 	warning = FALSE,
-	include = FALSE,
-	root.dir = "C:/Users/lilac2/Box/GIEWS_Project/GIEWS/R"
+	include = FALSE
 )
 
+rm(list = ls())
+gc()
 
+code_dir<-getwd()
+cleandata_dir<-gsub("/Code$","/Data/Clean Data",code_dir)
+
+load(file = paste0(cleandata_dir,"/CM2022.RData"))
+
+figure_dir<-gsub("/Code$","/Output/Figures",code_dir)
+table_dir<-gsub("/Code$","/Output/Tables",code_dir)
 
 ```
 
 
-0. Import dataset and combine with producer prices
-```{r import0,include=FALSE,warning=FALSE}
+1. Compare real and nominal price availability and correct any errors
+```{r prelim}
+#rm(maize_geo)
+#maize_geo<- read_dta("~/Box/GIEWS_project/GIEWS/Data/maizegeoprices_042722.dta")
 
-## Clear worksace
-rm(list = ls())
-gc()
+sum(is.na(maize_geo$price_real_kg))
+#3096 observations missing from Somalia and a few from South Sudan
 
-setwd("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final")
-
-maize_prices<-read_dta("./Data/Clean Data/maizegeoprices_042722.dta")
-prod_prices<-read_dta("./Data/Clean Data/prod_prices_131221.dta")
-cropdata<-read_dta("./Data/Clean Data/cropdata_042722.dta")
-seasons<-read_dta("./Data/Clean Data/seasons.dta")%>%mutate(country=revalue(country,c("Swaziland"="Eswatini","Cape Verde"="Cabo Verde")))
-
-
-allprices<-full_join(maize_prices,prod_prices,by=c("country","market","market_type","commodity","year","month"))
-
-missingcpi=maize_prices%>%#3096 observations from Somalia and a few from South Sudan
-   filter(is.na(price_real_kg))
  
 #evidence of extreme outliers/errors, no luck through mad scores or zscores or any other thoughtful approach so by hand is necessary
 ##there is an error in 6 markets in Cameroon for January 2021, I think the price listed is per kg, not per 15KG, drop them
-maize_nom<-maize_prices%>%
+maize_nom<-maize_geo%>%
   filter(!is.na(price_kg))%>%
 filter(!(market=="Kirundo"&year==2015&month==1&commodity=="Maize (white)"&market_type=="Retail"),
          !(market=="Kasempa"&year==2020&month==3&commodity=="Maize (white)"&market_type=="Retail"),
@@ -77,28 +74,23 @@ maize_real<-maize_nom%>%
    filter(!is.na(price_real_kg))
   
 
-rm(missingcpi,maize_prices)
+rm(maize_geo)
 
 ```
 
 
 
-1. Look at measures of skewness and kurtosis 
-```{r skew1,echo=FALSE}
-
-
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+2. Look at measures of skewness and kurtosis 
+```{r skew1}
 
 skew_mkt=maize_real%>%
-  #unite("z",country,region,commodity,market_type,market,sep="_")%>%
-  #filter(z%in%mlist)%>%
-  #separate(z,c("country","region","commodity","market_type","market"),sep="_")%>%
   group_by(country,commodity,market,market_type)%>%
   dplyr::summarise(nobs=n(),cv=(sd(price_real_kg)/mean(price_real_kg)),
                    skew=skewness(price_real_kg),kurt=kurtosis(price_real_kg))%>%
   mutate(n_skew=if_else(skew<=0,1,0),n_kurt=if_else(kurt<=0,1,0))%>%
   ungroup()
 
+nrow(filter(skew_mkt,kurt<0))
 #no evidence of negative kurtosis in any markets
 
 
@@ -137,12 +129,12 @@ skew_wholesale=skew_country%>%
   dplyr::mutate(across(c(n_skew_pct),~paste0(sprintf("%.1f",.*100),"%")),across(c(cv,skew),round,3))
 
 print=xtable(skew_retail,type="latex")
-names(print)<-c("Country","Commodity","Markets","CV","Average Market Skewness ","Percent Markets Negative Skew")
-print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/skew_retail_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+names(print)<-c("Country","Commodity","Markets","CV","Average Market Skewness","Percent Markets Negative Skew")
+print(print,file=paste0(table_dir,"/skew_retail.tex"),include.rownames=FALSE)
 
 print=xtable(skew_wholesale,type="latex")
-names(print)<-c("Country","Commodity","Markets","CV","Average Market Skewness ","Percent Markets Negative Skew")
-print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/skew_wholesale_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+names(print)<-c("Country","Commodity","Markets","CV","Average Market Skewness","Percent Markets Negative Skew")
+print(print,file=paste0(table_dir,"/skew_wholesale.tex"),include.rownames=FALSE)
 
 rm(skew_mkt,skew_country,print,skew_retail,skew_wholesale,sum_retail,sum_wholesale)
 
@@ -151,10 +143,9 @@ rm(skew_mkt,skew_country,print,skew_retail,skew_wholesale,sum_retail,sum_wholesa
 
 
 
-2. Map of markets
-```{r map2,echo=FALSE,warning=FALSE,message=FALSE}
+3. Map of markets
+```{r map,results='hide'}
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
 
 markets=maize_real%>%
   dplyr::select(country,market,market_type,lat,lon)%>%
@@ -183,15 +174,15 @@ ggplot(data = world) +
         axis.text.y=element_blank(),axis.ticks.y=element_blank(),axis.title.y=element_blank())
 
 
-ggsave("market_map.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/market_map.PNG"),width=12,height=9)
 
 rm(markets,countries,world)
 
 ```
 
 
-3. Assign planting and harvest season months
-```{r assign3,echo=FALSE,warning=FALSE,message=FALSE,results='hide'}
+4. Assign planting and harvest season months
+```{r assign,results='hide'}
 
 #Reminder: note h1x,h2x,p1x,p2x if planting or harvest seasons that cross the end of the year, e.g. harvest starts in Dec and ends in Jan 
 maize_real<-maize_real%>%
@@ -230,6 +221,9 @@ maize_nom<-maize_nom%>%
    mutate(date=parse_date_time(yyyymm,"ym"))%>%
   dplyr::select(country,region,market,lat,lon,commodity,market_type,currency,year,month,price_kg,monthtype1,monthtype2,contains("harvest"),date)
 
+#create lists of single and double season countries
+seasons=seasons%>%
+  mutate(country=revalue(country,c("Swaziland"="Eswatini","Cape Verde"="Cabo Verde")))
 
 single=unlist(seasons%>%
                 group_by(country)%>%dplyr::summarise(main=min(main_harvest_start,na.rm=TRUE),second=min(second_harvest_start,na.rm=TRUE))%>%
@@ -246,8 +240,8 @@ rm(seasons)
 
 
 
-4. Calculate returns from min harvest to max "lean season" (3 months pre-harvest)
-```{r harvest4,echo=FALSE,include=FALSE}
+5r. Calculate returns from min harvest to max "lean season" (3 months pre-harvest)
+```{r harvestr,results='hide'}
 
 #isolate the month of harvest begin for the main season and make a full set for all years and markets
 beginharvest1=maize_real%>%
@@ -295,7 +289,7 @@ lean1=maize_real%>%
   mutate(cropyear=as.numeric(cropyear))%>%
   dplyr::select(temp,cropyear,lmax1,lmin1)
   
-#which month is the lean
+
 
 #repeat for second season
 lean2=maize_real%>%  
@@ -348,7 +342,7 @@ harvest2_minmax=harvest2%>%
   dplyr::select(temp,cropyear,hmin2,hmax2)
 
 
-###connect and calculate returns
+###connect and calculate returns for primary season
 returns1=full_join(lean1,harvest1_minmax,by=c("temp","cropyear"))%>%
   mutate(returns1=(lmax1-hmin1)/hmin1,  #calculate max returns
          noarb1=if_else(lmax1<=hmin1,1,0))
@@ -370,8 +364,8 @@ rm(harvest1_minmax,harvest2_minmax,lean1,lean2,beginharvest1,beginharvest2,years
 ```
 
 
-4.nom. Calculate returns from min harvest to max "lean season" (3 months pre-harvest) for nominal prices
-```{r harvest4,echo=FALSE,include=FALSE}
+5n. Calculate returns from min harvest to max "lean season" (3 months pre-harvest) for nominal prices
+```{r harvestn,results='hide'}
 
 #isolate the month of harvest begin for the main season and make a full set for all years and markets
 beginharvest1n=maize_nom%>%
@@ -419,7 +413,7 @@ lean1n=maize_nom%>%
   mutate(cropyear=as.numeric(cropyear))%>%
   dplyr::select(temp,cropyear,lmax1,lmin1)
   
-#which month is the lean
+
 
 #repeat for second season
 lean2n=maize_nom%>%  
@@ -472,7 +466,7 @@ harvest2n_minmax=harvest2n%>%
   dplyr::select(temp,cropyear,hmin2,hmax2)
 
 
-###connect and calculate returns
+###connect and calculate returns for the primary season
 returns1n=full_join(lean1n,harvest1n_minmax,by=c("temp","cropyear"))%>%
   mutate(returns1=(lmax1-hmin1)/hmin1,  #calculate max returns
          noarb1=if_else(lmax1<=hmin1,1,0))
@@ -496,8 +490,8 @@ rm(harvest1n_minmax,harvest2n_minmax,lean1n,lean2n,beginharvest1n,beginharvest2n
 
 
 
-5. Calculate intratemporal returns by varying the number of months after harvest end (only real)
-```{r duration5,echo=FALSE,include=FALSE}
+6. Calculate intratemporal returns by varying the number of months after harvest end (only real)
+```{r duration,results='hide'}
 
 #isolate the month of harvest end for the main season and determine the price decile for the country and market type
 harvest1_end=harvest1%>%
@@ -524,7 +518,6 @@ returns_dur1=maize_real%>%
   left_join(cropdata,by=c("country","cropyear"="year"))%>%
   dplyr::select(-contains("_harvest_"),-contains("monthtype"))
 
-write_dta(returns_dur1,paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Data/Clean Data/returns_dur1_",format(Sys.Date(),"%d%m%y"),".dta"))
 
 #repeat for second season
 returns_dur2=maize_real%>%
@@ -535,11 +528,6 @@ filter(duration2%in%1:11)%>%
     left_join(cropdata,by=c("country","cropyear"="year"))%>%
   dplyr::select(-lat,-lon,-currency,-contains("_harvest_"),-contains("monthtype"))
 
-#rejoin the returns 
-# returns_dur=full_join(returns_dur1,returns_dur2,by=c("country","region","market","commodity","market_type","year","month","price_real_kg","date"))%>%
-#       arrange(country,region,market,commodity,year,month)
-
-
 
 
 rm(harvest1,harvest2,harvest1_end,harvest2_end)
@@ -548,8 +536,8 @@ rm(harvest1,harvest2,harvest1_end,harvest2_end)
 
 
 
-6. Create summary data sets
-```{r summary6,echo=FALSE}
+7. Create summary data sets
+```{r summary,results='hide'}
 
 pctp=function(x){
   y=mean(x[x>0],na.rm=TRUE)
@@ -591,13 +579,8 @@ season_mktn=returnsn_con%>%
 ```
 
 
-7. Print summary datasets
-```{r print7,echo=FALSE}
-
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
-
-#code could be streamlined)
-
+8r. Print summary datasets for real prices
+```{r printr,results='hide'}
 
 #Seasonal returns (COUNTRYLEVEL) for single season markets
 season_country1=returns_con%>%
@@ -766,29 +749,19 @@ header12<-c("Country","Commodity","Years",
 
 print=xtable(retail1,type="latex")
 names(print)<-header1
-print(print,file=paste0("./retailprices_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/retailprices_single.tex"),include.rownames=FALSE)
 
 print=xtable(retail12,type="latex")
 names(print)<-header12
-print(print,file=paste0("./retailprices_double_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/retailprices_double.tex"),include.rownames=FALSE)
 
 print=xtable(wholesale1,type="latex")
 names(print)<-header1
-print(print,file=paste0("./wholesaleprices_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/wholesaleprices_single.tex"),include.rownames=FALSE)
 
 print=xtable(wholesale12,type="latex")
 names(print)<-header12
-print(print,file=paste0("./wholesaleprices_double_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
-
-
-###ltd for presentations
-# #main season (retail)
-# retail1_ltd=retail1%>%
-#   dplyr::select(country,e.returns1,pct_season1,neg.returns1)
-# 
-# print=xtable(retail1_ltd,type="latex")
-# names(print)<-c("Country","Average Total Returns","Frequency of Negative Returns","Average Negative Returns")
-# print(print,file=paste0("./retailprices_ltd_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/wholesaleprices_double.tex"),include.rownames=FALSE)
 
 
 rm(list=ls(pattern="sum_"),retail1,retail12,wholesale1,wholesale12,print,header1,header12,season_country1,season_country12,all_years1,all_years12)
@@ -798,12 +771,8 @@ rm(list=ls(pattern="sum_"),retail1,retail12,wholesale1,wholesale12,print,header1
 
 
 
-7.nom. Print summary datasets (repeat for nominal)
-```{r print7,echo=FALSE}
-
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
-
-
+8n. Print summary datasets for nominal prices
+```{r printn,results='hide'}
 
 #Seasonal returns (COUNTRYLEVEL) for single season markets
 season_country1=returnsn_con%>%
@@ -970,29 +939,21 @@ header12<-c("Country","Commodity","Years",
 
 print=xtable(retail1,type="latex")
 names(print)<-header1
-print(print,file=paste0("./retailprices_single_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/retailprices_single_nom.tex"),include.rownames=FALSE)
 
 print=xtable(retail12,type="latex")
 names(print)<-header12
-print(print,file=paste0("./retailprices_double_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/retailprices_double_nom.tex"),include.rownames=FALSE)
 
 print=xtable(wholesale1,type="latex")
 names(print)<-header1
-print(print,file=paste0("./wholesaleprices_single_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/wholesaleprices_single_nom.tex"),include.rownames=FALSE)
 
 print=xtable(wholesale12,type="latex")
 names(print)<-header12
-print(print,file=paste0("./wholesaleprices_double_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/wholesaleprices_double_nom.tex"),include.rownames=FALSE)
 
 
-###ltd for presentations
-# #main season (retail)
-# retail1_ltd=retail1%>%
-#   dplyr::select(country,e.returns1,pct_season1,neg.returns1)
-# 
-# print=xtable(retail1_ltd,type="latex")
-# names(print)<-c("Country","Average Total Returns","Frequency of Negative Returns","Average Negative Returns")
-# print(print,file=paste0("./retailprices_ltd_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 
 rm(list=ls(pattern="sum_"),retail1,retail12,wholesale1,wholesale12,print,header1,header12,season_country1,season_country12,all_years1,all_years12)
@@ -1003,10 +964,8 @@ rm(list=ls(pattern="sum_"),retail1,retail12,wholesale1,wholesale12,print,header1
 
 
 
-8. Data availability (real)
-```{r missing8,echo=FALSE,include=FALSE}
-
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+9. Data availability (real prices only)
+```{r missing,results='hide'}
 
 ###all markets
 mstats=maize_real%>%
@@ -1033,44 +992,44 @@ mstats=left_join(mstats,missing,by=c("country","commodity","market_type","season
 mstats1_retail=mstats%>%
   filter(market_type=="Retail"&seasons=="single")%>%
   dplyr::select(-market_type,-seasons,-contains("_sec"))%>%
-  dplyr::bind_rows(dplyr::summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+  dplyr::bind_rows(dplyr::summarise_all(.,~if(is.numeric(.)) sum(.) else "Total"))
   
 
 print=xtable(mstats1_retail,type="latex")
 names(print)<-c("Country","Commodity","Total Years","Total Markets","N markets 1+ years","N markets 5+ years")
-print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingstats_single_retail_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/missingstats_single_retail.tex"),include.rownames=FALSE)
 
 mstats1_wholesale=mstats%>%
   filter(market_type=="Wholesale"&seasons=="single")%>%
   dplyr::select(-market_type,-seasons,-contains("_sec"))%>%
-  dplyr::bind_rows(dplyr::summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+  dplyr::bind_rows(dplyr::summarise_all(.,~if(is.numeric(.)) sum(.) else "Total"))
 
 
 print=xtable(mstats1_wholesale,type="latex")
 names(print)<-c("Country","Commodity","Total Years","Total Markets","N markets 1+ years","N markets 5+ years")
-print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingstats_single_wholesale_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/missingstats_single_wholesale.tex"),include.rownames=FALSE)
 
 
 mstats12_retail=mstats%>%
   filter(market_type=="Retail"&seasons=="double")%>%
   dplyr::select(-market_type,-seasons)%>%
-  dplyr::bind_rows(dplyr::summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+  dplyr::bind_rows(dplyr::summarise_all(.,~if(is.numeric(.)) sum(.) else "Total"))
 
 
 print=xtable(mstats12_retail,type="latex")
 names(print)<-c("Country","Commodity","Total Years","Total Markets","Main N markets 1+ years","Main N markets 5+ years","Second N markets 1+ years","Second N markets 5+ years")
-print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingstats_double_retail_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/missingstats_double_retail.tex"),include.rownames=FALSE)
 
 
 mstats12_wholesale=mstats%>%
   filter(market_type=="Wholesale"&seasons=="double")%>%
   dplyr::select(-market_type,-seasons)%>%
-  dplyr::bind_rows(dplyr::summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+  dplyr::bind_rows(dplyr::summarise_all(.,~if(is.numeric(.)) sum(.) else "Total"))
 
 
 print=xtable(mstats12_wholesale,type="latex")
 names(print)<-c("Country","Commodity","Total Years","Total Markets","Main N markets 1+ years","Main N markets 5+ years","Second N markets 1+ years","Second N markets 5+ years")
-print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingstats_double_wholesale_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/missingstats_double_wholesale.tex"),include.rownames=FALSE)
 
 
 
@@ -1104,7 +1063,7 @@ print=xtable(stats_all,type="latex")
 names(print)<-c("Market Type","Season","Number of Countries",
                 "Number of Unique Markets n/ Primary Season","Number of Market-Year Observations n/ Primary Season",
                 "Number of Unique Markets n/ Secondary Season","Number of Market-Year Observations n/ Secondary Season")
-print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/stats_all_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/stats_all.tex"),include.rownames=FALSE)
 
 
 rm(list=ls(pattern="mstats"),print,stats_all,missing)
@@ -1112,8 +1071,8 @@ rm(list=ls(pattern="mstats"),print,stats_all,missing)
 ```
 
 
-9. Missingness analysis
-```{r missing9,echo=FALSE}
+10. Missingness analysis (real prices only)
+```{r missing,results='hide'}
 
 
 #analyze causes of missingness in primary season retail markets(single season)
@@ -1204,7 +1163,7 @@ t1=left_join(t1,table,by="country")
 
 print=xtable(t1,type="latex")
 names(print)<-c("Country","Both prices exist","No harvest Price","No lean price","Mean return","T-test")
-print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingness_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/missingness_single.tex"),include.rownames=FALSE)
 
 
 
@@ -1248,10 +1207,9 @@ t2[is.na(t2)]=""
 
 print=xtable(t2,type="latex")
 names(print)<-c("Country","Both prices exist for both seasons","Incomplete primary season","Incomplete secondary season","Incomplete due to other permutation","Mean return primary season","Mean return secondary season")
-print(print,file=paste0("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/missingness_double_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(print,file=paste0(table_dir,"/missingness_double.tex"),include.rownames=FALSE)
 
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
 
 ##make pictures
 missing_m1$meanreturn=missing_m1$meanreturn*100
@@ -1264,7 +1222,7 @@ ggplot()+
   theme(axis.text.x = element_text(angle = 45, hjust = 1),panel.background = element_blank(),
         axis.line = element_line(colour = "black"),panel.grid.major.y = element_line(colour = "black"),panel.grid.minor.y = element_line(colour = "black"))
 
-ggsave("missingness_single.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/missingness_single.PNG"),width=12,height=9)
 
 
 
@@ -1281,7 +1239,7 @@ ggplot()+
   theme(axis.text.x = element_text(angle = 45, hjust = 1),panel.background = element_blank(),
         axis.line = element_line(colour = "black"),panel.grid.major.y = element_line(colour = "black"),panel.grid.minor.y = element_line(colour = "black"))
 
-ggsave("missingness_double.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/missingness_double.PNG"),width=12,height=9)
 
 
 
@@ -1293,10 +1251,9 @@ rm(list=ls(pattern="missing"),t1,t2,print,c_all,cname,g1,g2,i,n_mkt,pval,s,t,t_a
 
 
 
-10. Output figure: Dot plot of frequency of negative returns vs severity of trend (average returns)
-```{r output10,echo=FALSE}
+11. Output figure: Dot plot of frequency of negative returns vs severity of trend (average returns)
+```{r output}
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
 
 #separately for single and double seasons
 
@@ -1311,7 +1268,7 @@ ggplot()+
          axis.line = element_line(color="black"))+guides(size = guide_legend(reverse = TRUE))+
   geom_hline(yintercept=0,color="darkgray")+ scale_size(range = c(0.5,3),breaks=c(5,10,15,20),name="Number of \n market-years")
 
-ggsave("seasondotplot_single.png")
+ggsave(paste0(figure_dir,"/seasondotplot_single.png"))
 
 cb12=season_mkt%>%
   filter(market_type=="Retail"&country%in%double)%>%
@@ -1328,7 +1285,7 @@ ggplot()+
          axis.line = element_line(color="black"))+guides(size = guide_legend(reverse = TRUE))+
   geom_hline(yintercept=0,color="darkgray")+ scale_size(range = c(0.5,3),breaks=c(5,10,15,20),name="Number of \n market-years")
 
-ggsave("seasondotplot_double.png")
+ggsave(paste0(figure_dir,"/seasondotplot_double.png"))
 
  
 neg_all=cb1%>%filter(pct_season1==1) #25
@@ -1354,7 +1311,7 @@ rm(list=ls(pattern="pos_"))
 11. Output figure: Dot plot of frequency of negative returns over time 
 ```{r output11,echo=FALSE}
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+
 
 #for single season countries
 
@@ -1371,7 +1328,7 @@ ggplot()+geom_jitter(data=time1,aes(x=factor(cropyear),y=returns1*100,color=yiel
   geom_hline(yintercept=0,color="red",position="identity")+
   theme(panel.grid.major = element_line(color="lightgray"),panel.grid.minor = element_blank(), panel.background = element_blank(),axis.line = element_line(color="black"),legend.position = c(1, 1),legend.justification = c(1, 1))
 
-ggsave("cropyear_returns_dot_single_yield.PNG")
+ggsave(paste0(figure_dir,"/cropyear_returns_dot_single_yield.PNG"))
 
 ggplot()+geom_jitter(data=time1,aes(x=factor(cropyear),y=returns1*100,color=prod_mt),size=1.0,alpha=0.75)+ #geom_hline(yintercept=0,color="red",position="identity")+
   scale_color_gradient2(low="gray80",high="gray10",na.value="gray",name="Production (MT)")+
@@ -1380,7 +1337,7 @@ ggplot()+geom_jitter(data=time1,aes(x=factor(cropyear),y=returns1*100,color=prod
   geom_hline(yintercept=0,color="red",position="identity")+
   theme(panel.grid.major = element_line(color="lightgray"),panel.grid.minor = element_blank(), panel.background = element_blank(),axis.line = element_line(color="black"),legend.position = c(1, 1),legend.justification = c(1, 1))
 
-ggsave("cropyear_returns_dot_single_prod.PNG")
+ggsave(paste0(figure_dir,"/cropyear_returns_dot_single_prod.PNG"))
 
 
 time12=returns_con%>%
@@ -1396,7 +1353,7 @@ ggplot()+geom_jitter(data=time12,aes(x=factor(cropyear),y=returns*100,color=seas
   geom_hline(yintercept=0,color="red",position="identity")+
   theme(panel.grid.major = element_line(color="lightgray"),panel.grid.minor = element_blank(), panel.background = element_blank(),axis.line = element_line(color="black"),legend.position = c(1, 1),legend.justification = c(1, 1))
   
-ggsave("cropyear_returns_dot_double_yield.PNG")
+ggsave(paste0(figure_dir,"/cropyear_returns_dot_double_yield.PNG"))
 
 
 
@@ -1412,7 +1369,7 @@ rm(time1,time12)
 12. Plots for distribution of extreme harvest prices and returns (for seasonal returns) 
 ```{r output12,echo=FALSE}
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/")
+
 
 #for single season countries
 exharvest1=returns_con%>%
@@ -1434,7 +1391,7 @@ ggplot()+
         legend.position = c(0.9, 0.9),legend.justification = c(1, 1),text=element_text(size=15))
 
 
-ggsave("harvestprices_returns_single.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/harvestprices_returns_single.PNG"),width=12,height=9)
 
 
 exharvest12=returns_con%>%
@@ -1460,7 +1417,7 @@ ggplot()+
   theme(panel.grid.minor = element_blank(),axis.line = element_line(color="black"),panel.background = element_blank(),
         legend.position = c(0.9, 0.9),legend.justification = c(1, 1),text=element_text(size=15))
 
-ggsave("harvestprices_returns_double.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/harvestprices_returns_double.PNG"),width=12,height=9)
 
 
 
@@ -1591,11 +1548,11 @@ table_fe=table_fe%>%
 
 t=xtable(table,type="latex",auto=TRUE)
 names(t)<-c("Country","Commodity","Number of Markets","Harvest price z-score (OLS)","R squared","Harvest price z-score (probit)","Pseudo-R squared")
-print(t,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/OLSprobitreturns_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(t,file=paste0(table_dir,"/OLSprobitreturns_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 t_fe=xtable(table_fe,type="latex",auto=TRUE)
 names(t_fe)<-c("Country","Commodity","Number of Markets","Harvest price z-score (OLS)","R squared","Harvest price z-score (probit)","Pseudo-R squared")
-print(t_fe,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/OLSprobitreturns_FE_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(t_fe,file=paste0(table_dir,"/OLSprobitreturns_FE_single_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 
 rm(cprep,cprep_fe,df,table,table_fe,split.df,t,t_fe,i,cname,pm,o,p,s,list=ls(pattern="pool"),country.name,m,y,n_mkt)
@@ -1729,22 +1686,21 @@ minr_nostore=minr_country%>%
   dplyr::select(country,commodity,n_mkt,starts_with("minr."))
 
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
 
 sim_table_grp=xtable(nostore_0,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0("./nostore_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r0,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0("./nostore_riskgrp_r",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_r",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0("./nostore_i5_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_i5_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r10,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0("./nostore_i10_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_i10_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(minr_nostore,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0("./nostore_minr_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_minr_riskgrp_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 
 
@@ -1865,13 +1821,13 @@ nostore_r5n=sim_countryn%>%
 setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
 
 sim_table_grp=xtable(nostore_0n,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0("./nostore_riskgrp_nom_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_nom_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r0n,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0("./nostore_riskgrp_r_nom_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_riskgrp_r_nom_",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 sim_table_grp=xtable(nostore_r5n,auto=TRUE,type="latex")
-print(sim_table_grp,file=paste0("./nostore_i_riskgrp_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(sim_table_grp,file=paste0(table_dir,"/nostore_i_riskgrp_nom",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 
 rm(ex_pricen,nostore_0n,nostore_r0n,nostore_r5n,list=ls(pattern="sim"),ex_price_c,kpss_mktn)
@@ -1975,7 +1931,7 @@ nostore_r5=sim_country%>%
 
 
 table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
-print(table_grp,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/nostore_pred_i5",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(table_grp,file=paste0(table_dir,"/nostore_pred_i5",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 
 rm(p_df,table_grp,table3,i,cm.name,split.df,nostore_r5,df)
@@ -2080,7 +2036,7 @@ nostore_r5=sim_country%>%
 
 
 table_grp=xtable(nostore_r5,auto=TRUE,type="latex")
-print(table_grp,file=paste0("c:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output/nostore_pred_nom_i5",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
+print(table_grp,file=paste0(table_dir,"/nostore_pred_nom_i5",format(Sys.Date(),"%m_%d_%y"),".tex"),include.rownames=FALSE)
 
 
 rm(p_df,table_grp,table3,i,cm.name,split.df,nostore_r0,df)
@@ -2097,8 +2053,6 @@ Appendix
 A1.Box and dotplots for intratemporal returns (thoughts on second season for double countries)
 ```{r durationA1,echo=FALSE}
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
-
 
 ## Duration (FULL SET) data set for single season countries
 dur_1=returns_dur1%>%
@@ -2113,7 +2067,7 @@ ggplot()+geom_boxplot(data=subset(dur_1,country%in%single),aes(x=factor(duration
   facet_wrap(.~country,ncol=4)+
   theme(plot.margin=margin(-0.5,-0.5,-0.5,-0.5,"pt"), panel.margin = unit(0.5,"cm"))
 
-ggsave("dur_returns_facet_single.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/dur_returns_facet_single.PNG"),width=12,height=9)
 
 
 ######Returns to duration by country (boxplot)
@@ -2124,7 +2078,7 @@ ggplot()+geom_boxplot(data=subset(dur_1,country%in%double),aes(x=factor(duration
   facet_wrap(.~country,ncol=4)+
   theme(plot.margin=margin(-0.5,-0.5,-0.5,-0.5,"pt"), panel.margin = unit(0.5,"cm"))
 
-ggsave("dur_returns_facet_double.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/dur_returns_facet_double.PNG"),width=12,height=9)
 
 
 rm(list=ls(pattern="dur_"))
@@ -2140,7 +2094,6 @@ rm(list=ls(pattern="dur_"))
 A2. Monthly Average Graphs by Country and Market
 ```{r monthlyavg2}
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
 
 
 maize_monavg = maize%>%
@@ -2179,7 +2132,7 @@ ggplot()+
     theme(panel.grid.minor = element_blank(),panel.background = element_blank(),
          axis.line = element_line(color="black"), strip.background = element_rect(color="black",fill="white"))
 
-ggsave("monavg_facet_single.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/monavg_facet_single.PNG"),width=12,height=9)
 
 ggplot()+
   geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=main_plant_start,xmax=main_plant_end,ymin=-Inf,ymax=Inf,fill="gray90"),
@@ -2206,7 +2159,7 @@ ggplot()+
          axis.line = element_line(color="black"), strip.background = element_rect(color="black",fill="white"))
 
 #need to note weird shit with DRC seasons because of multi-region
-ggsave("monavg_facet_double.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"monavg_facet_double.PNG"),width=12,height=9)
 
 
 rm(list=ls(pattern="monavg"))
@@ -2218,7 +2171,7 @@ rm(list=ls(pattern="monavg"))
 A3. Minmax Graphs by Country
 ```{r minmax3}
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
 
 
 maize_minmax=maize%>%
@@ -2248,7 +2201,7 @@ scale_fill_manual(name="Month Type",values=c("turquoise","navyblue"),breaks=c("m
          axis.line = element_line(color="black"), strip.background = element_rect(color="black",fill="gray"))
 
 
-ggsave("minmax_facet_single.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/minmax_facet_single.PNG"),width=12,height=9)
 
 ggplot()+
   geom_rect(data=subset(c_seasons,country%in%double),mapping=aes(xmin=main_plant_start,xmax=main_plant_end,ymin=0,ymax=Inf,fill="gray90"),
@@ -2276,7 +2229,7 @@ scale_fill_manual(name="Month Type",values=c("turquoise","navyblue"),breaks=c("m
       theme(panel.grid.minor = element_blank(),panel.background = element_blank(),
          axis.line = element_line(color="black"), strip.background = element_rect(color="black",fill="gray"))
 
-ggsave("minmax_facet_double.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,/"minmax_facet_double.PNG"),width=12,height=9)
 
 rm(list=ls(pattern="minmax"),c_seasons)
 
@@ -2286,7 +2239,7 @@ rm(list=ls(pattern="minmax"),c_seasons)
 A4. Certainty equivalent over all length of time (TBD)
 ```{r duration4,echo=FALSE,results='asis', message = FALSE}
 
-setwd("C:/Users/lilac2/Box/GIEWS_Project/GIEWS/Final/Output")
+
 
 #create data frame with prices and returns for primary maize retail season, then calculate mean and variance for prices and returns and the minimum risk coefficient to avoid storage for that harvest price
 ex_priced=duration1%>%
@@ -2349,7 +2302,7 @@ duration_risk=ggplot()+
         text= element_text(family="serif"))
 
 
-ggsave("duration_risk.PNG",width=12,height=9)
+ggsave(paste0(figure_dir,"/duration_risk.PNG"),width=12,height=9)
 
 
 ```
