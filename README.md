@@ -20,7 +20,7 @@ Any issues should be directly to the package developer. In section 2, there is a
 
 4. Market location data was found using the R geocode command from [TidyGeocoder](https://jessecambon.github.io/tidygeocoder). For any missing coordinates, there are two additional excel files with coordinate data from GoogleEarth.
 
-5. National yield and production data were downloaded from [FAOSTAT](https://www.fao.org/faostat/en/*data/QCL) and [USDA Foreign Agricultural Service](https://apps.fas.usda.gov/psdonline/app/index.html#/app/downloads) as of April 2022. The data are in the public domain and are available in the "Raw Data" folder.
+5. National yield and production data were downloaded from [FAOSTAT](https://www.fao.org/faostat/en/#data/QCL) and [USDA Foreign Agricultural Service](https://apps.fas.usda.gov/psdonline/app/index.html#/app/downloads) as of April 2022. The data are in the public domain and are available in the "Raw Data" folder.
 
 
 ## Code
