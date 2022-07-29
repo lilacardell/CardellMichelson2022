@@ -30,6 +30,7 @@ The dataanalysis_042722 file imports the "CM2022.Rdata" file from the "Clean Dat
 
 ## Approximate Run Time
 The file dataimport_042722 will take approximately 30 minutes to run. The delay is due to the geocoding function.
+
 The file dataanalysis_042722 will take 10-15 minutes to run, depending on how the ggplot functions are feeling.
 
 ## References
